@@ -405,8 +405,16 @@ function Hide-Console([string]$key) {
     }
 }
 
+function Test-ConsoleVisible([string]$key) {
+    $hWnd = Get-ConsoleHandle $key
+    if ($hWnd -and $hWnd -ne [IntPtr]::Zero) {
+        return [Win32Window]::IsWindowVisible($hWnd)
+    }
+    return $false
+}
+
 function Toggle-Console([string]$key) {
-    if ($script:cmdVisible[$key]) { Hide-Console $key } else { Show-Console $key }
+    if (Test-ConsoleVisible $key) { Hide-Console $key } else { Show-Console $key }
 }
 
 function Show-AllConsoles {
@@ -508,12 +516,12 @@ function Build-TrayMenu {
 
     # Toggle Cmd windows
     $anyVis = $false
-    foreach ($k in $script:services.Keys) { if ($script:cmdVisible[$k]) { $anyVis = $true; break } }
+    foreach ($k in $script:services.Keys) { if (Test-ConsoleVisible $k) { $anyVis = $true; break } }
     $toggleCmd = New-Object System.Windows.Forms.ToolStripMenuItem
     $toggleCmd.Text = if ($anyVis) { [char]0x2612 + "  Hide Cmd" } else { [char]0x2610 + "  Show Cmd" }
     $toggleCmd.Add_Click({
         $av = $false
-        foreach ($k in $script:services.Keys) { if ($script:cmdVisible[$k]) { $av = $true; break } }
+        foreach ($k in $script:services.Keys) { if (Test-ConsoleVisible $k) { $av = $true; break } }
         if ($av) { Hide-AllConsoles } else { Show-AllConsoles }
     })
     $menu.Items.Add($toggleCmd) | Out-Null
@@ -589,7 +597,7 @@ function Add-ServiceMenuItems($menu, [string]$key) {
 
     # Show/Hide Console toggle
     $hasWindow = ($script:cmdPids[$key] -and $script:cmdPids[$key] -gt 0)
-    $isVisible = $script:cmdVisible[$key]
+    $isVisible = Test-ConsoleVisible $key
     $consoleItem = New-Object System.Windows.Forms.ToolStripMenuItem
     $consoleItem.Tag = $key
     if ($hasWindow) {
@@ -718,7 +726,7 @@ $script:btnToggleCmd.FlatStyle = "Flat"
 $script:btnToggleCmd.Add_Click({
     $anyVisible = $false
     foreach ($k in $script:services.Keys) {
-        if ($script:cmdVisible[$k]) { $anyVisible = $true; break }
+        if (Test-ConsoleVisible $k) { $anyVisible = $true; break }
     }
     if ($anyVisible) { Hide-AllConsoles } else { Show-AllConsoles }
     Update-Dashboard
@@ -971,7 +979,7 @@ function Update-Dashboard {
         $btns.Console.Enabled = ($script:cmdPids[$key] -and $script:cmdPids[$key] -gt 0)
         # Cmd button style: error(pulse) > visible(blue) > hidden(default)
         if (-not $isError) {
-            if ($script:cmdVisible[$key]) {
+            if (Test-ConsoleVisible $key) {
                 $btns.Console.BackColor = [System.Drawing.Color]::FromArgb(37, 99, 235)
                 $btns.Console.ForeColor = [System.Drawing.Color]::White
                 $btns.Console.Text = "Cmd"
@@ -985,7 +993,7 @@ function Update-Dashboard {
     # Update toggle button text
     $anyVisible = $false
     foreach ($k in $script:services.Keys) {
-        if ($script:cmdVisible[$k]) { $anyVisible = $true; break }
+        if (Test-ConsoleVisible $k) { $anyVisible = $true; break }
     }
     $script:btnToggleCmd.Text = if ($anyVisible) { "Hide Cmd" } else { "Show Cmd" }
     # All Start 버튼 중복 클릭 방지
