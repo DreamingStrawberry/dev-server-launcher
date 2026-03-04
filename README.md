@@ -61,7 +61,7 @@ On first run, a `DevLauncher.config.json` file is created with example services.
 [
   {
     "key": "my-backend",
-    "label": "My Backend :8080",
+    "group": "MyApp",
     "short": "Back",
     "port": 8080,
     "dir": "C:\\Projects\\my-app",
@@ -69,7 +69,7 @@ On first run, a `DevLauncher.config.json` file is created with example services.
   },
   {
     "key": "my-frontend",
-    "label": "My Frontend :5173",
+    "group": "MyApp",
     "short": "Front",
     "port": 5173,
     "dir": "C:\\Projects\\my-app\\frontend",
@@ -81,7 +81,7 @@ On first run, a `DevLauncher.config.json` file is created with example services.
 | Field | Description |
 |-------|-------------|
 | `key` | Unique identifier for the service |
-| `label` | Display name shown in balloon notifications |
+| `group` | Group header in tray menu (services with same group are grouped together) |
 | `short` | Short name used in menu and dashboard |
 | `port` | TCP port to monitor for status detection |
 | `dir` | Working directory for the service command |
