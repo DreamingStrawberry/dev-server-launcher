@@ -704,6 +704,142 @@ $script:btnToggleCmd.Add_Click({
 })
 $script:dashboard.Controls.Add($script:btnToggleCmd)
 
+$btnSettings = New-Object System.Windows.Forms.Button
+$btnSettings.Location = New-Object System.Drawing.Point(420, $y)
+$btnSettings.Size = New-Object System.Drawing.Size(60, 30)
+$btnSettings.Text = [char]0x2699 + " Edit"
+$btnSettings.FlatStyle = "Flat"
+$btnSettings.ForeColor = [System.Drawing.Color]::FromArgb(107, 114, 128)
+$btnSettings.Add_Click({ Show-SettingsForm })
+$script:dashboard.Controls.Add($btnSettings)
+
+# ═══════════════════════════════════════════════
+# Settings Form
+# ═══════════════════════════════════════════════
+function Show-SettingsForm {
+    $form = New-Object System.Windows.Forms.Form
+    $form.Text = "Service Settings"
+    $form.Size = New-Object System.Drawing.Size(700, 420)
+    $form.StartPosition = "CenterParent"
+    $form.FormBorderStyle = "FixedDialog"
+    $form.MaximizeBox = $false
+    $form.MinimizeBox = $false
+    $form.Font = New-Object System.Drawing.Font("Segoe UI", 9)
+
+    $grid = New-Object System.Windows.Forms.DataGridView
+    $grid.Location = New-Object System.Drawing.Point(10, 10)
+    $grid.Size = New-Object System.Drawing.Size(665, 300)
+    $grid.AllowUserToResizeRows = $false
+    $grid.RowHeadersVisible = $false
+    $grid.SelectionMode = "FullRowSelect"
+    $grid.AutoSizeColumnsMode = "Fill"
+    $grid.BackgroundColor = [System.Drawing.Color]::White
+    $grid.BorderStyle = "Fixed3D"
+    $grid.DefaultCellStyle.Font = New-Object System.Drawing.Font("Consolas", 9)
+
+    # Columns
+    $colKey = New-Object System.Windows.Forms.DataGridViewTextBoxColumn
+    $colKey.Name = "key"; $colKey.HeaderText = "Key"; $colKey.FillWeight = 12
+    $colShort = New-Object System.Windows.Forms.DataGridViewTextBoxColumn
+    $colShort.Name = "short"; $colShort.HeaderText = "Short"; $colShort.FillWeight = 10
+    $colPort = New-Object System.Windows.Forms.DataGridViewTextBoxColumn
+    $colPort.Name = "port"; $colPort.HeaderText = "Port"; $colPort.FillWeight = 8
+    $colDir = New-Object System.Windows.Forms.DataGridViewTextBoxColumn
+    $colDir.Name = "dir"; $colDir.HeaderText = "Dir"; $colDir.FillWeight = 35
+    $colCmd = New-Object System.Windows.Forms.DataGridViewTextBoxColumn
+    $colCmd.Name = "cmd"; $colCmd.HeaderText = "Cmd"; $colCmd.FillWeight = 35
+
+    $grid.Columns.AddRange(@($colKey, $colShort, $colPort, $colDir, $colCmd))
+
+    # Load current config
+    try {
+        $json = Get-Content $script:configPath -Raw -Encoding UTF8 | ConvertFrom-Json
+        foreach ($svc in $json) {
+            $grid.Rows.Add($svc.key, $svc.short, $svc.port, $svc.dir, $svc.cmd) | Out-Null
+        }
+    } catch {}
+
+    $form.Controls.Add($grid)
+
+    # Bottom buttons
+    $btnAdd = New-Object System.Windows.Forms.Button
+    $btnAdd.Location = New-Object System.Drawing.Point(10, 320)
+    $btnAdd.Size = New-Object System.Drawing.Size(70, 30)
+    $btnAdd.Text = "+ Add"
+    $btnAdd.FlatStyle = "Flat"
+    $btnAdd.ForeColor = [System.Drawing.Color]::FromArgb(37, 99, 235)
+    $btnAdd.Add_Click({ $grid.Rows.Add("new-svc", "New", "3000", "C:\", "echo hello") | Out-Null })
+    $form.Controls.Add($btnAdd)
+
+    $btnDel = New-Object System.Windows.Forms.Button
+    $btnDel.Location = New-Object System.Drawing.Point(85, 320)
+    $btnDel.Size = New-Object System.Drawing.Size(80, 30)
+    $btnDel.Text = "- Remove"
+    $btnDel.FlatStyle = "Flat"
+    $btnDel.ForeColor = [System.Drawing.Color]::FromArgb(220, 38, 38)
+    $btnDel.Add_Click({
+        foreach ($row in @($grid.SelectedRows)) {
+            if (-not $row.IsNewRow) { $grid.Rows.Remove($row) }
+        }
+    })
+    $form.Controls.Add($btnDel)
+
+    $btnBrowse = New-Object System.Windows.Forms.Button
+    $btnBrowse.Location = New-Object System.Drawing.Point(170, 320)
+    $btnBrowse.Size = New-Object System.Drawing.Size(80, 30)
+    $btnBrowse.Text = "Browse..."
+    $btnBrowse.FlatStyle = "Flat"
+    $btnBrowse.Add_Click({
+        $fbd = New-Object System.Windows.Forms.FolderBrowserDialog
+        $fbd.Description = "Select service directory"
+        if ($fbd.ShowDialog() -eq "OK" -and $grid.CurrentRow) {
+            $grid.CurrentRow.Cells["dir"].Value = $fbd.SelectedPath
+        }
+    })
+    $form.Controls.Add($btnBrowse)
+
+    $btnSave = New-Object System.Windows.Forms.Button
+    $btnSave.Location = New-Object System.Drawing.Point(510, 320)
+    $btnSave.Size = New-Object System.Drawing.Size(70, 30)
+    $btnSave.Text = "Save"
+    $btnSave.FlatStyle = "Flat"
+    $btnSave.ForeColor = [System.Drawing.Color]::FromArgb(22, 163, 74)
+    $btnSave.Add_Click({
+        $newConfig = @()
+        foreach ($row in $grid.Rows) {
+            if ($row.IsNewRow) { continue }
+            $k = "$($row.Cells['key'].Value)".Trim()
+            $s = "$($row.Cells['short'].Value)".Trim()
+            $p = "$($row.Cells['port'].Value)".Trim()
+            $d = "$($row.Cells['dir'].Value)".Trim()
+            $c = "$($row.Cells['cmd'].Value)".Trim()
+            if (-not $k -or -not $p) { continue }
+            $label = "$s :$p"
+            $newConfig += [ordered]@{ key=$k; label=$label; short=$s; port=[int]$p; dir=$d; cmd=$c }
+        }
+        if ($newConfig.Count -eq 0) {
+            [System.Windows.Forms.MessageBox]::Show("At least one service is required.", "Settings", "OK", "Warning")
+            return
+        }
+        $newConfig | ConvertTo-Json -Depth 3 | Set-Content $script:configPath -Encoding UTF8
+        [System.Windows.Forms.MessageBox]::Show(
+            "Saved. Restart DevLauncher to apply changes.",
+            "Settings", "OK", "Information")
+        $form.Close()
+    })
+    $form.Controls.Add($btnSave)
+
+    $btnCancel = New-Object System.Windows.Forms.Button
+    $btnCancel.Location = New-Object System.Drawing.Point(585, 320)
+    $btnCancel.Size = New-Object System.Drawing.Size(70, 30)
+    $btnCancel.Text = "Cancel"
+    $btnCancel.FlatStyle = "Flat"
+    $btnCancel.Add_Click({ $form.Close() })
+    $form.Controls.Add($btnCancel)
+
+    $form.ShowDialog() | Out-Null
+}
+
 function Update-Dashboard {
     foreach ($key in $script:services.Keys) {
         $svc = $script:services[$key]
