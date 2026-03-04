@@ -55,29 +55,37 @@ The dashboard shows real-time status for each service:
 
 ## Configuration
 
-Edit the `$script:services` hashtable in `DevLauncher.ps1` to define your services:
+On first run, a `DevLauncher.config.json` file is created with example services. Edit it to define your own:
 
-```powershell
-$script:services = [ordered]@{
-    "my-service" = @{
-        Label = "My Service :3000"
-        Short = "MySvc"
-        Port  = 3000
-        Dir   = "C:\path\to\project"
-        Cmd   = "npm start"
-    }
-}
+```json
+[
+  {
+    "key": "my-backend",
+    "label": "My Backend :8080",
+    "short": "Back",
+    "port": 8080,
+    "dir": "C:\\Projects\\my-app",
+    "cmd": "mvnw.cmd spring-boot:run"
+  },
+  {
+    "key": "my-frontend",
+    "label": "My Frontend :5173",
+    "short": "Front",
+    "port": 5173,
+    "dir": "C:\\Projects\\my-app\\frontend",
+    "cmd": "npm run dev"
+  }
+]
 ```
 
-Each service entry requires:
-
-| Key | Description |
-|-----|-------------|
-| `Label` | Display name shown in balloon notifications |
-| `Short` | Short name used in menu and dashboard |
-| `Port` | TCP port to monitor for status detection |
-| `Dir` | Working directory for the service command |
-| `Cmd` | Command to execute (runs inside `cmd.exe /k`) |
+| Field | Description |
+|-------|-------------|
+| `key` | Unique identifier for the service |
+| `label` | Display name shown in balloon notifications |
+| `short` | Short name used in menu and dashboard |
+| `port` | TCP port to monitor for status detection |
+| `dir` | Working directory for the service command |
+| `cmd` | Command to execute (runs inside `cmd.exe /k`) |
 
 ## File Structure
 
@@ -85,6 +93,7 @@ Each service entry requires:
 DevLauncher.ps1           # Main script
 DevLauncher.bat           # Launcher (kills previous instance, runs ps1)
 DevLauncher.ico           # Auto-generated tray/taskbar icon
+DevLauncher.config.json   # Service definitions (auto-generated, gitignored)
 DevLauncher.history.json  # Startup time history (auto-generated, gitignored)
 DevLauncher.log           # Error log (auto-generated, gitignored)
 ```
