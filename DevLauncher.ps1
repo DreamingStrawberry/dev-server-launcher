@@ -504,6 +504,13 @@ function Build-TrayMenu {
     $menu = New-Object System.Windows.Forms.ContextMenuStrip
     $menu.RenderMode = "System"
 
+    # Live-refresh timer while menu is open
+    $menuTimer = New-Object System.Windows.Forms.Timer
+    $menuTimer.Interval = 1000
+    $menuTimer.Add_Tick({ Update-TrayMenuItems })
+    $menu.Add_Opened({ $menuTimer.Start() })
+    $menu.Add_Closed({ $menuTimer.Stop(); $menuTimer.Dispose() })
+
     # Header
     $header = New-Object System.Windows.Forms.ToolStripLabel "Dev Server Launcher"
     $header.Font = New-Object System.Drawing.Font("Segoe UI", 9, [System.Drawing.FontStyle]::Bold)
