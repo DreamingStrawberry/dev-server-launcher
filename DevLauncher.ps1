@@ -584,6 +584,12 @@ function Build-TrayMenu {
 
     $menu.Items.Add((New-Object System.Windows.Forms.ToolStripSeparator)) | Out-Null
 
+    # Settings
+    $settings = New-Object System.Windows.Forms.ToolStripMenuItem
+    $settings.Text = [char]0x2699 + "  Settings"
+    $settings.Add_Click({ Show-SettingsForm })
+    $menu.Items.Add($settings) | Out-Null
+
     # Exit
     $exit = New-Object System.Windows.Forms.ToolStripMenuItem
     $exit.Text = "Exit"
