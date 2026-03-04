@@ -7,6 +7,8 @@
            각 서비스는 별도 cmd 창에서 실행 (로그 확인 가능)
 #>
 
+$script:AppVersion = "1.0.0"
+
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 
@@ -592,7 +594,7 @@ function Add-ServiceMenuItems($menu, [string]$key) {
 # Dashboard Form (double-click tray to open)
 # ═══════════════════════════════════════════════
 $script:dashboard = New-Object System.Windows.Forms.Form
-$script:dashboard.Text = "Dev Server Launcher"
+$script:dashboard.Text = "Dev Server Launcher v$($script:AppVersion)"
 if (Test-Path $icoPath) {
     $script:dashboard.Icon = New-Object System.Drawing.Icon($icoPath)
 }
