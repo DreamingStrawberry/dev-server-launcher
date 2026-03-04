@@ -167,37 +167,48 @@ if (-not (Test-Path $lnkPath)) {
 [System.Windows.Forms.Application]::EnableVisualStyles()
 
 # ═══════════════════════════════════════════════
-# Configuration
+# Configuration (from DevLauncher.config.json)
 # ═══════════════════════════════════════════════
-$script:services = [ordered]@{
-    "mw-back" = @{
-        Label = "Mediwell Backend :8080"
-        Short = "MW-Back"
-        Port  = 8080
-        Dir   = "C:\Users\Dogensoft\IdeaProjects\mediwell"
-        Cmd   = "mvnw.cmd compile && mvnw.cmd spring-boot:run -U"
+$script:configPath = Join-Path $PSScriptRoot "DevLauncher.config.json"
+
+# Generate default config if missing
+if (-not (Test-Path $script:configPath)) {
+    $defaultConfig = @(
+        [ordered]@{ key = "my-backend";  label = "My Backend :8080";  short = "Back";  port = 8080; dir = "C:\Projects\my-app"; cmd = "mvnw.cmd spring-boot:run" }
+        [ordered]@{ key = "my-frontend"; label = "My Frontend :5173"; short = "Front"; port = 5173; dir = "C:\Projects\my-app\frontend"; cmd = "npm run dev" }
+    )
+    $defaultConfig | ConvertTo-Json -Depth 3 | Set-Content $script:configPath -Encoding UTF8
+    [System.Windows.Forms.MessageBox]::Show(
+        "DevLauncher.config.json created with example services.`nEdit it to add your own services, then restart.",
+        "Dev Server Launcher", "OK", "Information")
+    exit
+}
+
+# Load config
+$script:services = [ordered]@{}
+try {
+    $configJson = Get-Content $script:configPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    foreach ($svc in $configJson) {
+        $script:services[$svc.key] = @{
+            Label = $svc.label
+            Short = $svc.short
+            Port  = [int]$svc.port
+            Dir   = $svc.dir
+            Cmd   = $svc.cmd
+        }
     }
-    "mw-react" = @{
-        Label = "Mediwell React :5180"
-        Short = "MW-React"
-        Port  = 5180
-        Dir   = "C:\Users\Dogensoft\IdeaProjects\mediwell\frontend\react"
-        Cmd   = "npm run dev -- --host"
-    }
-    "crm-back" = @{
-        Label = "CRM+ Backend :8085"
-        Short = "CRM-Back"
-        Port  = 8085
-        Dir   = "C:\Users\Dogensoft\IdeaProjects\crmplus\backend"
-        Cmd   = "mvnw.cmd spring-boot:run -U"
-    }
-    "crm-react" = @{
-        Label = "CRM+ React :5173"
-        Short = "CRM-React"
-        Port  = 5173
-        Dir   = "C:\Users\Dogensoft\IdeaProjects\crmplus\frontend"
-        Cmd   = "npm run dev -- --host"
-    }
+} catch {
+    [System.Windows.Forms.MessageBox]::Show(
+        "Failed to load DevLauncher.config.json`n$($_.Exception.Message)",
+        "Dev Server Launcher", "OK", "Error")
+    exit
+}
+
+if ($script:services.Count -eq 0) {
+    [System.Windows.Forms.MessageBox]::Show(
+        "No services defined in DevLauncher.config.json",
+        "Dev Server Launcher", "OK", "Warning")
+    exit
 }
 
 $script:cmdPids = @{}
