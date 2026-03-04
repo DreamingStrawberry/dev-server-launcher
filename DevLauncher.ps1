@@ -504,20 +504,6 @@ function Build-TrayMenu {
     $menu = New-Object System.Windows.Forms.ContextMenuStrip
     $menu.RenderMode = "System"
 
-    # Live-refresh while menu is open (threading timer bypasses modal loop)
-    $menu.Add_Opened({
-        $script:menuRefreshTimer = New-Object System.Threading.Timer(
-            [System.Threading.TimerCallback]{
-                param($state)
-                try { $script:tray.ContextMenuStrip.Invoke([Action]{ Update-TrayMenuItems }) } catch {}
-            }, $null, 1000, 1500)
-    })
-    $menu.Add_Closed({
-        if ($script:menuRefreshTimer) {
-            $script:menuRefreshTimer.Dispose()
-            $script:menuRefreshTimer = $null
-        }
-    })
 
     # Header
     $header = New-Object System.Windows.Forms.ToolStripLabel "Dev Server Launcher"
