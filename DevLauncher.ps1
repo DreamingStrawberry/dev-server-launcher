@@ -722,24 +722,72 @@ $script:dashboard.Controls.Add($btnSettings)
 function Show-SettingsForm {
     $form = New-Object System.Windows.Forms.Form
     $form.Text = "Service Settings"
-    $form.Size = New-Object System.Drawing.Size(700, 420)
+    $form.Size = New-Object System.Drawing.Size(820, 420)
     $form.StartPosition = "CenterParent"
-    $form.FormBorderStyle = "FixedDialog"
-    $form.MaximizeBox = $false
-    $form.MinimizeBox = $false
+    $form.FormBorderStyle = "Sizable"
+    $form.MinimumSize = New-Object System.Drawing.Size(700, 350)
     $form.Font = New-Object System.Drawing.Font("Segoe UI", 9)
 
     $grid = New-Object System.Windows.Forms.DataGridView
     $grid.Location = New-Object System.Drawing.Point(10, 10)
-    $grid.Size = New-Object System.Drawing.Size(665, 300)
+    $grid.Size = New-Object System.Drawing.Size(785, 300)
+    $grid.Anchor = "Top,Left,Right,Bottom"
     $grid.AllowUserToResizeRows = $false
     $grid.RowHeadersVisible = $false
     $grid.SelectionMode = "FullRowSelect"
     $grid.AutoSizeColumnsMode = "Fill"
+    $grid.ScrollBars = "Both"
     $grid.BackgroundColor = [System.Drawing.Color]::White
     $grid.BorderStyle = "Fixed3D"
     $grid.DefaultCellStyle.Font = New-Object System.Drawing.Font("Consolas", 9)
+    $grid.DefaultCellStyle.WrapMode = "NoSet"
     $grid.AllowUserToAddRows = $false
+
+    # Double-click cell → edit full content in popup
+    $grid.Add_CellDoubleClick({
+        param($s, $e)
+        if ($e.RowIndex -lt 0 -or $e.ColumnIndex -lt 0) { return }
+        $cell = $grid.Rows[$e.RowIndex].Cells[$e.ColumnIndex]
+        $colName = $grid.Columns[$e.ColumnIndex].HeaderText
+
+        $editForm = New-Object System.Windows.Forms.Form
+        $editForm.Text = "Edit: $colName"
+        $editForm.Size = New-Object System.Drawing.Size(500, 160)
+        $editForm.StartPosition = "CenterParent"
+        $editForm.FormBorderStyle = "FixedDialog"
+        $editForm.MaximizeBox = $false
+        $editForm.MinimizeBox = $false
+        $editForm.Font = New-Object System.Drawing.Font("Consolas", 10)
+
+        $tb = New-Object System.Windows.Forms.TextBox
+        $tb.Location = New-Object System.Drawing.Point(10, 10)
+        $tb.Size = New-Object System.Drawing.Size(465, 24)
+        $tb.Text = "$($cell.Value)"
+        $tb.Anchor = "Top,Left,Right"
+        $editForm.Controls.Add($tb)
+
+        $btnOk = New-Object System.Windows.Forms.Button
+        $btnOk.Location = New-Object System.Drawing.Point(310, 50)
+        $btnOk.Size = New-Object System.Drawing.Size(75, 30)
+        $btnOk.Text = "OK"
+        $btnOk.DialogResult = "OK"
+        $btnOk.FlatStyle = "Flat"
+        $editForm.Controls.Add($btnOk)
+        $editForm.AcceptButton = $btnOk
+
+        $btnCn = New-Object System.Windows.Forms.Button
+        $btnCn.Location = New-Object System.Drawing.Point(395, 50)
+        $btnCn.Size = New-Object System.Drawing.Size(75, 30)
+        $btnCn.Text = "Cancel"
+        $btnCn.DialogResult = "Cancel"
+        $btnCn.FlatStyle = "Flat"
+        $editForm.Controls.Add($btnCn)
+        $editForm.CancelButton = $btnCn
+
+        if ($editForm.ShowDialog() -eq "OK") {
+            $cell.Value = $tb.Text
+        }
+    })
 
     # Columns
     $colKey = New-Object System.Windows.Forms.DataGridViewTextBoxColumn
@@ -772,13 +820,14 @@ function Show-SettingsForm {
             "Settings", "OK", "Error")
     }
 
-    # Bottom buttons
+    # Bottom buttons (anchored to bottom)
     $btnAdd = New-Object System.Windows.Forms.Button
     $btnAdd.Location = New-Object System.Drawing.Point(10, 320)
     $btnAdd.Size = New-Object System.Drawing.Size(70, 30)
     $btnAdd.Text = "+ Add"
     $btnAdd.FlatStyle = "Flat"
     $btnAdd.ForeColor = [System.Drawing.Color]::FromArgb(37, 99, 235)
+    $btnAdd.Anchor = "Bottom,Left"
     $btnAdd.Add_Click({ $grid.Rows.Add("new-svc", "New", "3000", "C:\", "echo hello") | Out-Null })
     $form.Controls.Add($btnAdd)
 
@@ -788,6 +837,7 @@ function Show-SettingsForm {
     $btnDel.Text = "- Remove"
     $btnDel.FlatStyle = "Flat"
     $btnDel.ForeColor = [System.Drawing.Color]::FromArgb(220, 38, 38)
+    $btnDel.Anchor = "Bottom,Left"
     $btnDel.Add_Click({
         foreach ($row in @($grid.SelectedRows)) {
             if (-not $row.IsNewRow) { $grid.Rows.Remove($row) }
@@ -800,6 +850,7 @@ function Show-SettingsForm {
     $btnBrowse.Size = New-Object System.Drawing.Size(80, 30)
     $btnBrowse.Text = "Browse..."
     $btnBrowse.FlatStyle = "Flat"
+    $btnBrowse.Anchor = "Bottom,Left"
     $btnBrowse.Add_Click({
         $fbd = New-Object System.Windows.Forms.FolderBrowserDialog
         $fbd.Description = "Select service directory"
@@ -810,11 +861,12 @@ function Show-SettingsForm {
     $form.Controls.Add($btnBrowse)
 
     $btnSave = New-Object System.Windows.Forms.Button
-    $btnSave.Location = New-Object System.Drawing.Point(510, 320)
+    $btnSave.Location = New-Object System.Drawing.Point(620, 320)
     $btnSave.Size = New-Object System.Drawing.Size(70, 30)
     $btnSave.Text = "Save"
     $btnSave.FlatStyle = "Flat"
     $btnSave.ForeColor = [System.Drawing.Color]::FromArgb(22, 163, 74)
+    $btnSave.Anchor = "Bottom,Right"
     $btnSave.Add_Click({
         $newConfig = @()
         foreach ($row in $grid.Rows) {
@@ -841,10 +893,11 @@ function Show-SettingsForm {
     $form.Controls.Add($btnSave)
 
     $btnCancel = New-Object System.Windows.Forms.Button
-    $btnCancel.Location = New-Object System.Drawing.Point(585, 320)
+    $btnCancel.Location = New-Object System.Drawing.Point(695, 320)
     $btnCancel.Size = New-Object System.Drawing.Size(70, 30)
     $btnCancel.Text = "Cancel"
     $btnCancel.FlatStyle = "Flat"
+    $btnCancel.Anchor = "Bottom,Right"
     $btnCancel.Add_Click({ $form.Close() })
     $form.Controls.Add($btnCancel)
 
