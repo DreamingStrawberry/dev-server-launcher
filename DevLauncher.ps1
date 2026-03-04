@@ -753,7 +753,12 @@ function Show-SettingsForm {
     $colCmd = New-Object System.Windows.Forms.DataGridViewTextBoxColumn
     $colCmd.Name = "cmd"; $colCmd.HeaderText = "Cmd"; $colCmd.FillWeight = 35
 
-    $grid.Columns.AddRange(@($colKey, $colShort, $colPort, $colDir, $colCmd))
+    $grid.Columns.Add($colKey) | Out-Null
+    $grid.Columns.Add($colShort) | Out-Null
+    $grid.Columns.Add($colPort) | Out-Null
+    $grid.Columns.Add($colDir) | Out-Null
+    $grid.Columns.Add($colCmd) | Out-Null
+    $form.Controls.Add($grid)
 
     # Load current config
     try {
@@ -766,8 +771,6 @@ function Show-SettingsForm {
             "Failed to load config: $($_.Exception.Message)",
             "Settings", "OK", "Error")
     }
-
-    $form.Controls.Add($grid)
 
     # Bottom buttons
     $btnAdd = New-Object System.Windows.Forms.Button
