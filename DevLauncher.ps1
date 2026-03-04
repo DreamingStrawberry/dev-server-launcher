@@ -996,7 +996,7 @@ function Update-Dashboard {
             $lbl.ForeColor = [System.Drawing.Color]::FromArgb(180, 140, 0)
             $btns.Start.Text = "Start"
             $btns.Start.Enabled = $false
-            $btns.Stop.Enabled = $false
+            $btns.Stop.Enabled = $true
         } elseif ($active) {
             $lbl.Text = "$([char]0x25CF) $($svc.Short) :$($svc.Port) Running"
             $lbl.ForeColor = [System.Drawing.Color]::FromArgb(22, 163, 74)
