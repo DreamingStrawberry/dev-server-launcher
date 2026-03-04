@@ -176,8 +176,8 @@ $script:configPath = Join-Path $PSScriptRoot "DevLauncher.config.json"
 # Generate default config if missing
 if (-not (Test-Path $script:configPath)) {
     $defaultConfig = @(
-        [ordered]@{ key = "my-backend";  label = "My Backend :8080";  short = "Back";  port = 8080; dir = "C:\Projects\my-app"; cmd = "mvnw.cmd spring-boot:run" }
-        [ordered]@{ key = "my-frontend"; label = "My Frontend :5173"; short = "Front"; port = 5173; dir = "C:\Projects\my-app\frontend"; cmd = "npm run dev" }
+        [ordered]@{ key = "my-backend";  group = "MyApp"; short = "Back";  port = 8080; dir = "C:\Projects\my-app"; cmd = "mvnw.cmd spring-boot:run" }
+        [ordered]@{ key = "my-frontend"; group = "MyApp"; short = "Front"; port = 5173; dir = "C:\Projects\my-app\frontend"; cmd = "npm run dev" }
     )
     $defaultConfig | ConvertTo-Json -Depth 3 | Set-Content $script:configPath -Encoding UTF8
     [System.Windows.Forms.MessageBox]::Show(
@@ -191,12 +191,14 @@ $script:services = [ordered]@{}
 try {
     $configJson = Get-Content $script:configPath -Raw -Encoding UTF8 | ConvertFrom-Json
     foreach ($svc in $configJson) {
+        $group = if ($svc.group) { $svc.group } else { "" }
         $script:services[$svc.key] = @{
-            Label = $svc.label
+            Label = "$($svc.short) :$($svc.port)"
             Short = $svc.short
             Port  = [int]$svc.port
             Dir   = $svc.dir
             Cmd   = $svc.cmd
+            Group = $group
         }
     }
 } catch {
@@ -509,23 +511,33 @@ function Build-TrayMenu {
     $menu.Items.Add($header) | Out-Null
     $menu.Items.Add((New-Object System.Windows.Forms.ToolStripSeparator)) | Out-Null
 
-    # MEDIWELL
-    $mwH = New-Object System.Windows.Forms.ToolStripLabel "  MEDIWELL"
-    $mwH.Font = New-Object System.Drawing.Font("Segoe UI", 8.5, [System.Drawing.FontStyle]::Bold)
-    $mwH.ForeColor = [System.Drawing.Color]::FromArgb(37, 99, 235)
-    $menu.Items.Add($mwH) | Out-Null
-    Add-ServiceMenuItems $menu "mw-back"
-    Add-ServiceMenuItems $menu "mw-react"
-
-    $menu.Items.Add((New-Object System.Windows.Forms.ToolStripSeparator)) | Out-Null
-
-    # CRM+
-    $crmH = New-Object System.Windows.Forms.ToolStripLabel "  CRM+"
-    $crmH.Font = New-Object System.Drawing.Font("Segoe UI", 8.5, [System.Drawing.FontStyle]::Bold)
-    $crmH.ForeColor = [System.Drawing.Color]::FromArgb(16, 185, 129)
-    $menu.Items.Add($crmH) | Out-Null
-    Add-ServiceMenuItems $menu "crm-back"
-    Add-ServiceMenuItems $menu "crm-react"
+    # Dynamic service groups
+    $groupColors = @(
+        [System.Drawing.Color]::FromArgb(37, 99, 235)   # blue
+        [System.Drawing.Color]::FromArgb(16, 185, 129)  # green
+        [System.Drawing.Color]::FromArgb(234, 88, 12)   # orange
+        [System.Drawing.Color]::FromArgb(139, 92, 246)  # purple
+        [System.Drawing.Color]::FromArgb(220, 38, 38)   # red
+    )
+    $lastGroup = $null; $groupIdx = 0
+    foreach ($key in $script:services.Keys) {
+        $grp = $script:services[$key].Group
+        if ($grp -ne $lastGroup) {
+            if ($null -ne $lastGroup) {
+                $menu.Items.Add((New-Object System.Windows.Forms.ToolStripSeparator)) | Out-Null
+            }
+            if ($grp) {
+                $color = $groupColors[$groupIdx % $groupColors.Count]
+                $grpLabel = New-Object System.Windows.Forms.ToolStripLabel "  $grp"
+                $grpLabel.Font = New-Object System.Drawing.Font("Segoe UI", 8.5, [System.Drawing.FontStyle]::Bold)
+                $grpLabel.ForeColor = $color
+                $menu.Items.Add($grpLabel) | Out-Null
+                $groupIdx++
+            }
+            $lastGroup = $grp
+        }
+        Add-ServiceMenuItems $menu $key
+    }
 
     $menu.Items.Add((New-Object System.Windows.Forms.ToolStripSeparator)) | Out-Null
 
@@ -827,17 +839,20 @@ function Show-SettingsForm {
     })
 
     # Columns
+    $colGroup = New-Object System.Windows.Forms.DataGridViewTextBoxColumn
+    $colGroup.Name = "group"; $colGroup.HeaderText = "Group"; $colGroup.FillWeight = 12
     $colKey = New-Object System.Windows.Forms.DataGridViewTextBoxColumn
     $colKey.Name = "key"; $colKey.HeaderText = "Key"; $colKey.FillWeight = 12
     $colShort = New-Object System.Windows.Forms.DataGridViewTextBoxColumn
     $colShort.Name = "short"; $colShort.HeaderText = "Short"; $colShort.FillWeight = 10
     $colPort = New-Object System.Windows.Forms.DataGridViewTextBoxColumn
-    $colPort.Name = "port"; $colPort.HeaderText = "Port"; $colPort.FillWeight = 8
+    $colPort.Name = "port"; $colPort.HeaderText = "Port"; $colPort.FillWeight = 7
     $colDir = New-Object System.Windows.Forms.DataGridViewTextBoxColumn
-    $colDir.Name = "dir"; $colDir.HeaderText = "Dir"; $colDir.FillWeight = 35
+    $colDir.Name = "dir"; $colDir.HeaderText = "Dir"; $colDir.FillWeight = 30
     $colCmd = New-Object System.Windows.Forms.DataGridViewTextBoxColumn
-    $colCmd.Name = "cmd"; $colCmd.HeaderText = "Cmd"; $colCmd.FillWeight = 35
+    $colCmd.Name = "cmd"; $colCmd.HeaderText = "Cmd"; $colCmd.FillWeight = 30
 
+    $grid.Columns.Add($colGroup) | Out-Null
     $grid.Columns.Add($colKey) | Out-Null
     $grid.Columns.Add($colShort) | Out-Null
     $grid.Columns.Add($colPort) | Out-Null
@@ -849,7 +864,8 @@ function Show-SettingsForm {
     try {
         $json = Get-Content $script:configPath -Raw -Encoding UTF8 | ConvertFrom-Json
         foreach ($svc in $json) {
-            $grid.Rows.Add($svc.key, $svc.short, $svc.port, $svc.dir, $svc.cmd) | Out-Null
+            $grp = if ($svc.group) { $svc.group } else { "" }
+            $grid.Rows.Add($grp, $svc.key, $svc.short, $svc.port, $svc.dir, $svc.cmd) | Out-Null
         }
     } catch {
         [System.Windows.Forms.MessageBox]::Show(
@@ -865,7 +881,7 @@ function Show-SettingsForm {
     $btnAdd.FlatStyle = "Flat"
     $btnAdd.ForeColor = [System.Drawing.Color]::FromArgb(37, 99, 235)
     $btnAdd.Anchor = "Bottom,Left"
-    $btnAdd.Add_Click({ $grid.Rows.Add("new-svc", "New", "3000", "C:\", "echo hello") | Out-Null })
+    $btnAdd.Add_Click({ $grid.Rows.Add("MyApp", "new-svc", "New", "3000", "C:\", "echo hello") | Out-Null })
     $form.Controls.Add($btnAdd)
 
     $btnDel = New-Object System.Windows.Forms.Button
@@ -908,14 +924,14 @@ function Show-SettingsForm {
         $newConfig = @()
         foreach ($row in $grid.Rows) {
             if ($row.IsNewRow) { continue }
+            $g = "$($row.Cells['group'].Value)".Trim()
             $k = "$($row.Cells['key'].Value)".Trim()
             $s = "$($row.Cells['short'].Value)".Trim()
             $p = "$($row.Cells['port'].Value)".Trim()
             $d = "$($row.Cells['dir'].Value)".Trim()
             $c = "$($row.Cells['cmd'].Value)".Trim()
             if (-not $k -or -not $p) { continue }
-            $label = "$s :$p"
-            $newConfig += [ordered]@{ key=$k; label=$label; short=$s; port=[int]$p; dir=$d; cmd=$c }
+            $newConfig += [ordered]@{ key=$k; group=$g; short=$s; port=[int]$p; dir=$d; cmd=$c }
         }
         if ($newConfig.Count -eq 0) {
             [System.Windows.Forms.MessageBox]::Show("At least one service is required.", "Settings", "OK", "Warning")
