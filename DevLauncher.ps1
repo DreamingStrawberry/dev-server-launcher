@@ -468,7 +468,37 @@ function New-TrayIcon([string]$state) {
 # ═══════════════════════════════════════════════
 # Build Context Menu (called only on tray click)
 # ═══════════════════════════════════════════════
+$script:menuServiceItems = @{}  # key → ToolStripMenuItem reference for live update
+
+function Get-ServiceStatus([string]$key) {
+    $svc = $script:services[$key]
+    $active = Test-PortActive $svc.Port
+    $isStarting = $script:startingSet[$key] -eq $true
+    $isError = $script:errorSet[$key] -eq $true
+    if ($isError) {
+        return @{ Dot = [char]0x2716; Status = "Error"; Color = [System.Drawing.Color]::FromArgb(220, 38, 38) }
+    } elseif ($isStarting -and -not $active) {
+        return @{ Dot = [char]0x25E6; Status = "Starting..."; Color = [System.Drawing.Color]::FromArgb(234, 179, 8) }
+    } elseif ($active) {
+        return @{ Dot = [char]0x25CF; Status = "Running"; Color = [System.Drawing.Color]::FromArgb(22, 163, 74) }
+    } else {
+        return @{ Dot = [char]0x25CB; Status = "Stopped"; Color = [System.Drawing.Color]::FromArgb(156, 163, 175) }
+    }
+}
+
+function Update-TrayMenuItems {
+    foreach ($key in $script:menuServiceItems.Keys) {
+        $item = $script:menuServiceItems[$key]
+        if (-not $item) { continue }
+        $svc = $script:services[$key]
+        $st = Get-ServiceStatus $key
+        $item.Text = "  $($st.Dot)  $($svc.Short)  :$($svc.Port)   [$($st.Status)]"
+        $item.ForeColor = $st.Color
+    }
+}
+
 function Build-TrayMenu {
+    $script:menuServiceItems = @{}
     $menu = New-Object System.Windows.Forms.ContextMenuStrip
     $menu.RenderMode = "System"
 
@@ -557,32 +587,13 @@ function Build-TrayMenu {
 function Add-ServiceMenuItems($menu, [string]$key) {
     $svc = $script:services[$key]
     $active = Test-PortActive $svc.Port
-    $isStarting = $script:startingSet[$key] -eq $true
-
-    $isError = $script:errorSet[$key] -eq $true
-
-    if ($isError) {
-        $dot = [char]0x2716     # X mark
-        $statusText = "Error - Cmd 확인"
-        $dotColor = [System.Drawing.Color]::FromArgb(220, 38, 38)   # red
-    } elseif ($isStarting -and -not $active) {
-        $dot = [char]0x25E6     # hollow bullet
-        $statusText = "Starting..."
-        $dotColor = [System.Drawing.Color]::FromArgb(234, 179, 8)   # yellow
-    } elseif ($active) {
-        $dot = [char]0x25CF     # filled circle
-        $statusText = "Running"
-        $dotColor = [System.Drawing.Color]::FromArgb(22, 163, 74)   # green
-    } else {
-        $dot = [char]0x25CB     # open circle
-        $statusText = "Stopped"
-        $dotColor = [System.Drawing.Color]::FromArgb(156, 163, 175) # gray
-    }
+    $st = Get-ServiceStatus $key
 
     $item = New-Object System.Windows.Forms.ToolStripMenuItem
-    $item.Text = "  $dot  $($svc.Short)  :$($svc.Port)   [$statusText]"
+    $item.Text = "  $($st.Dot)  $($svc.Short)  :$($svc.Port)   [$($st.Status)]"
     $item.Font = New-Object System.Drawing.Font("Consolas", 9)
-    $item.ForeColor = $dotColor
+    $item.ForeColor = $st.Color
+    $script:menuServiceItems[$key] = $item
 
     $startItem = New-Object System.Windows.Forms.ToolStripMenuItem
     $startItem.Text = if ($active) { "Restart" } else { "Start" }
@@ -1094,6 +1105,7 @@ $script:timer.Add_Tick({
     }
 
     Update-TrayIcon
+    Update-TrayMenuItems
     if ($script:dashboard -and $script:dashboard.Visible) { Update-Dashboard }
 })
 $script:timer.Start()
