@@ -1075,6 +1075,13 @@ $hiddenForm.Add_FormClosing({
     $script:timer.Stop()
     $script:startTimer.Stop()
     $script:pulseTimer.Stop()
+    # Kill all running service processes
+    foreach ($k in $script:services.Keys) {
+        if ($script:cmdPids[$k]) {
+            try { & taskkill /F /T /PID $script:cmdPids[$k] 2>$null | Out-Null } catch {}
+        }
+        Stop-ByPort $script:services[$k].Port
+    }
     $script:tray.Visible = $false
     $script:tray.Dispose()
     try { $script:mutex.ReleaseMutex() } catch {}
