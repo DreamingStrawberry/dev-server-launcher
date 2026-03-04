@@ -598,7 +598,8 @@ $script:dashboard.Text = "Dev Server Launcher v$($script:AppVersion)"
 if (Test-Path $icoPath) {
     $script:dashboard.Icon = New-Object System.Drawing.Icon($icoPath)
 }
-$script:dashboard.Size = New-Object System.Drawing.Size(510, 280)
+$script:dashContentHeight = 10 + ($script:services.Count * 34) + 6 + 30 + 16  # rows + gap + buttons + padding
+$script:dashboard.Size = New-Object System.Drawing.Size(510, ($script:dashContentHeight + 40))  # +40 for title bar
 $script:dashboard.StartPosition = "CenterScreen"
 $script:dashboard.FormBorderStyle = "FixedSingle"
 $script:dashboard.MaximizeBox = $false
@@ -738,6 +739,7 @@ function Show-SettingsForm {
     $grid.BackgroundColor = [System.Drawing.Color]::White
     $grid.BorderStyle = "Fixed3D"
     $grid.DefaultCellStyle.Font = New-Object System.Drawing.Font("Consolas", 9)
+    $grid.AllowUserToAddRows = $false
 
     # Columns
     $colKey = New-Object System.Windows.Forms.DataGridViewTextBoxColumn
@@ -759,7 +761,11 @@ function Show-SettingsForm {
         foreach ($svc in $json) {
             $grid.Rows.Add($svc.key, $svc.short, $svc.port, $svc.dir, $svc.cmd) | Out-Null
         }
-    } catch {}
+    } catch {
+        [System.Windows.Forms.MessageBox]::Show(
+            "Failed to load config: $($_.Exception.Message)",
+            "Settings", "OK", "Error")
+    }
 
     $form.Controls.Add($grid)
 
