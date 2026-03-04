@@ -357,6 +357,8 @@ function Stop-Svc([string]$key, [bool]$quiet = $false) {
     $script:cmdVisible[$key] = $false
     $script:errorSet.Remove($key)
     $script:wasRunning.Remove($key)
+    $script:startingSet.Remove($key)
+    $script:startTimes.Remove($key)
 
     Update-TrayIcon
     if (-not $quiet) {
@@ -523,6 +525,8 @@ function Build-TrayMenu {
     $allStop.Text = [char]0x25A0 + "  All Stop"
     $allStop.ForeColor = [System.Drawing.Color]::FromArgb(220, 38, 38)
     $allStop.Add_Click({
+        $script:startQueue.Clear()
+        $script:startTimer.Stop()
         foreach ($k in $script:services.Keys) { Stop-Svc $k $true }
         $script:tray.ShowBalloonTip(2000, "All Stopped", "모든 서비스 종료됨", [System.Windows.Forms.ToolTipIcon]::Warning)
     })
@@ -699,6 +703,8 @@ $btnStopAll.Text = "All Stop"
 $btnStopAll.FlatStyle = "Flat"
 $btnStopAll.ForeColor = [System.Drawing.Color]::FromArgb(220, 38, 38)
 $btnStopAll.Add_Click({
+    $script:startQueue.Clear()
+    $script:startTimer.Stop()
     foreach ($k in $script:services.Keys) { Stop-Svc $k $true }
     Update-Dashboard
 })
