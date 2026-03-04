@@ -287,13 +287,9 @@ function Start-Svc([string]$key, [bool]$quiet = $false) {
         $script:cmdPids[$key] = $null
     }
 
-    # Kill by port and wait until actually released
+    # Kill by port (non-blocking — port release is checked by timer)
     if (Test-PortActive $svc.Port) {
         Stop-ByPort $svc.Port
-        for ($i = 0; $i -lt 10; $i++) {
-            Start-Sleep -Milliseconds 300
-            if (-not (Test-PortActive $svc.Port)) { break }
-        }
     }
 
     $title = "DevLauncher_$($svc.Short)_$($svc.Port)"
@@ -325,15 +321,7 @@ function Start-Svc([string]$key, [bool]$quiet = $false) {
     $script:startingSet[$key] = $true
     $script:startTimes[$key] = [DateTime]::Now
     $script:cmdVisible[$key] = $false  # 숨긴 상태로 시작
-
-    # 윈도우 핸들 캐시 (나중에 Show/Hide 토글에 사용)
-    $hWnd = [IntPtr]::Zero
-    for ($retry = 0; $retry -lt 15; $retry++) {
-        Start-Sleep -Milliseconds 200
-        $hWnd = [Win32Window]::FindWindowByTitle($title)
-        if ($hWnd -ne [IntPtr]::Zero) { break }
-    }
-    $script:cmdHandles[$key] = $hWnd
+    $script:cmdHandles[$key] = [IntPtr]::Zero  # Get-ConsoleHandle will find it lazily
 
     # Only update icon/tooltip, NOT the menu (menu is rebuilt on next click)
     Update-TrayIcon
@@ -763,11 +751,17 @@ function Update-Dashboard {
             $btns.Stop.Enabled = $false
         }
         $btns.Console.Enabled = ($script:cmdPids[$key] -and $script:cmdPids[$key] -gt 0)
-        # Reset Cmd button style for non-error services (pulse timer handles error styling)
+        # Cmd button style: error(pulse) > visible(blue) > hidden(default)
         if (-not $isError) {
-            $btns.Console.BackColor = [System.Drawing.SystemColors]::Control
-            $btns.Console.ForeColor = [System.Drawing.SystemColors]::ControlText
-            $btns.Console.Text = "Cmd"
+            if ($script:cmdVisible[$key]) {
+                $btns.Console.BackColor = [System.Drawing.Color]::FromArgb(37, 99, 235)
+                $btns.Console.ForeColor = [System.Drawing.Color]::White
+                $btns.Console.Text = "Cmd"
+            } else {
+                $btns.Console.BackColor = [System.Drawing.SystemColors]::Control
+                $btns.Console.ForeColor = [System.Drawing.SystemColors]::ControlText
+                $btns.Console.Text = "Cmd"
+            }
         }
     }
     # Update toggle button text
