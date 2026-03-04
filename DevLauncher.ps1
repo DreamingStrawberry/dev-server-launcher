@@ -269,13 +269,25 @@ function Update-TrayIcon {
     $state = if ($hasError) { "error" } elseif ($hasRunning) { "running" } else { "stopped" }
     $script:tray.Icon = New-TrayIcon $state
 
-    $n = 0; $e = 0; $total = $script:services.Count
+    $lines = @("Dev Server Launcher")
     foreach ($k in $script:services.Keys) {
-        if (Test-PortActive $script:services[$k].Port) { $n++ }
-        if ($script:errorSet[$k]) { $e++ }
+        $svc = $script:services[$k]
+        $active = Test-PortActive $svc.Port
+        $isStarting = $script:startingSet[$k] -eq $true
+        $isError = $script:errorSet[$k] -eq $true
+        if ($isError) {
+            $lines += "$([char]0x2716) $($svc.Short):$($svc.Port) Error"
+        } elseif ($isStarting -and -not $active) {
+            $lines += "$([char]0x25E6) $($svc.Short):$($svc.Port) Starting"
+        } elseif ($active) {
+            $lines += "$([char]0x25CF) $($svc.Short):$($svc.Port) Running"
+        } else {
+            $lines += "$([char]0x25CB) $($svc.Short):$($svc.Port) Stopped"
+        }
     }
-    $errText = if ($e -gt 0) { " ${e} error" } else { "" }
-    $script:tray.Text = "Dev Launcher [$n/$total running]$errText"
+    $tip = $lines -join "`n"
+    if ($tip.Length -gt 127) { $tip = $tip.Substring(0, 127) }
+    $script:tray.Text = $tip
 }
 
 function Start-Svc([string]$key, [bool]$quiet = $false) {
