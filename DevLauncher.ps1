@@ -1,13 +1,13 @@
 ﻿#Requires -Version 5.1
 <#
 .SYNOPSIS  Dev Server Launcher - System Tray
-.VERSION   1.0.0
+.VERSION   1.0.1
 .NOTES     DevLauncher.bat 더블클릭으로 실행
            트레이 아이콘 우클릭 → 서비스 시작/중지
            각 서비스는 별도 cmd 창에서 실행 (로그 확인 가능)
 #>
 
-$script:AppVersion = "1.0.0"
+$script:AppVersion = "1.0.1"
 
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
@@ -240,17 +240,47 @@ if (Test-Path $script:historyPath) {
 # ═══════════════════════════════════════════════
 # Port-based process management
 # ═══════════════════════════════════════════════
+# netstat 캐시 (2초 타이머 tick당 1회만 실행)
+$script:netstatCache = @()
+$script:netstatCacheTime = [DateTime]::MinValue
+
+function Refresh-NetstatCache {
+    if (([DateTime]::Now - $script:netstatCacheTime).TotalMilliseconds -gt 1500) {
+        $script:netstatCache = @(& netstat -ano 2>$null | Select-String "LISTENING")
+        $script:netstatCacheTime = [DateTime]::Now
+    }
+}
+
 function Get-PortPid([int]$port) {
-    $lines = & netstat -ano 2>$null | Select-String ":${port}\s.*LISTENING"
-    foreach ($line in $lines) {
-        $parts = $line.Line.Trim() -split '\s+'
-        $procId = [int]$parts[-1]
-        if ($procId -gt 0) { return $procId }
+    Refresh-NetstatCache
+    foreach ($line in $script:netstatCache) {
+        if ($line.Line -match ":${port}\s") {
+            $parts = $line.Line.Trim() -split '\s+'
+            $procId = [int]$parts[-1]
+            if ($procId -gt 0) { return $procId }
+        }
     }
     return 0
 }
 
 function Test-PortActive([int]$port) { return (Get-PortPid $port) -gt 0 }
+
+# Vite auto-increment 대응: 설정 포트 ~ +5 범위에서 실제 포트 찾기
+function Find-ActivePort([string]$key) {
+    $svc = $script:services[$key]
+    if (Test-PortActive $svc.Port) { return $svc.Port }
+    if ($script:cmdPids[$key]) {
+        try {
+            $p = Get-Process -Id $script:cmdPids[$key] -ErrorAction SilentlyContinue
+            if ($p) {
+                for ($i = 1; $i -le 5; $i++) {
+                    if (Test-PortActive ($svc.Port + $i)) { return ($svc.Port + $i) }
+                }
+            }
+        } catch {}
+    }
+    return 0
+}
 
 function Stop-ByPort([int]$port) {
     $procId = Get-PortPid $port
@@ -266,7 +296,7 @@ function Update-TrayIcon {
     $hasRunning = $false; $hasError = $false
     foreach ($k in $script:services.Keys) {
         if ($script:errorSet[$k]) { $hasError = $true }
-        if (Test-PortActive $script:services[$k].Port) { $hasRunning = $true }
+        if ((Find-ActivePort $k) -gt 0) { $hasRunning = $true }
     }
     $state = if ($hasError) { "error" } elseif ($hasRunning) { "running" } else { "stopped" }
     $script:tray.Icon = New-TrayIcon $state
@@ -274,7 +304,7 @@ function Update-TrayIcon {
     $lines = @("Dev Server Launcher")
     foreach ($k in $script:services.Keys) {
         $svc = $script:services[$k]
-        $active = Test-PortActive $svc.Port
+        $active = (Find-ActivePort $k) -gt 0
         $isStarting = $script:startingSet[$k] -eq $true
         $isError = $script:errorSet[$k] -eq $true
         if ($isError) {
@@ -288,7 +318,7 @@ function Update-TrayIcon {
         }
     }
     $tip = $lines -join "`n"
-    if ($tip.Length -gt 127) { $tip = $tip.Substring(0, 127) }
+    if ($tip.Length -gt 63) { $tip = $tip.Substring(0, 63) }
     $script:tray.Text = $tip
 }
 
@@ -303,43 +333,28 @@ function Start-Svc([string]$key, [bool]$quiet = $false) {
         $script:cmdPids[$key] = $null
     }
 
-    # Kill by port (non-blocking — port release is checked by timer)
+    $title = "DevLauncher_$($svc.Short)_$($svc.Port)"
+
+    # Kill by port (non-blocking — port wait is deferred to cmd.exe)
+    $portWasActive = $false
     if (Test-PortActive $svc.Port) {
         Stop-ByPort $svc.Port
+        $portWasActive = $true
     }
 
-    $title = "DevLauncher_$($svc.Short)_$($svc.Port)"
-    $fullCmd = "title $title && cd /d $($svc.Dir) && $($svc.Cmd)"
+    # If port was occupied, wait inside cmd for release (doesn't block UI thread)
+    $delaySuffix = if ($portWasActive) { " && ping -n 4 127.0.0.1 >nul 2>&1" } else { "" }
+    $fullCmd = "title $title && cd /d $($svc.Dir)$delaySuffix && $($svc.Cmd)"
 
-    # CreateProcess: CREATE_NEW_CONSOLE + STARTF_USESHOWWINDOW(SW_HIDE)
-    # → 윈도우가 생성 시점부터 숨겨진 상태 (Windows Terminal에서도 동작)
-    $si = New-Object Win32Window+STARTUPINFO
-    $si.cb = [System.Runtime.InteropServices.Marshal]::SizeOf([type][Win32Window+STARTUPINFO])
-    $si.lpTitle = $title
-    $si.dwFlags = 1      # STARTF_USESHOWWINDOW
-    $si.wShowWindow = 0  # SW_HIDE
-    $pi = New-Object Win32Window+PROCESS_INFORMATION
-    $cmdLine = "cmd.exe /k $fullCmd"
-    $cpOk = [Win32Window]::CreateProcess(
-        $null, $cmdLine, [IntPtr]::Zero, [IntPtr]::Zero, $false,
-        [Win32Window]::CREATE_NEW_CONSOLE,
-        [IntPtr]::Zero, $null, [ref]$si, [ref]$pi)
-    if ($cpOk) {
-        $script:cmdPids[$key] = $pi.dwProcessId
-        [Win32Window]::CloseHandle($pi.hProcess) | Out-Null
-        [Win32Window]::CloseHandle($pi.hThread) | Out-Null
-    } else {
-        # CreateProcess 실패 시 Start-Process 폴백 (WindowStyle Hidden)
-        $proc = Start-Process -FilePath "cmd.exe" -ArgumentList "/k $fullCmd" -WindowStyle Hidden -PassThru
-        $script:cmdPids[$key] = $proc.Id
-    }
+    # conhost.exe로 직접 실행 (Windows Terminal 우회 → Hidden 정상 동작)
+    $proc = Start-Process -FilePath "conhost.exe" -ArgumentList "cmd.exe /k $fullCmd" -WindowStyle Hidden -PassThru
+    $script:cmdPids[$key] = $proc.Id
     $script:cmdTitles[$key] = $title
     $script:startingSet[$key] = $true
     $script:startTimes[$key] = [DateTime]::Now
-    $script:cmdVisible[$key] = $false  # 숨긴 상태로 시작
-    $script:cmdHandles[$key] = [IntPtr]::Zero  # Get-ConsoleHandle will find it lazily
+    $script:cmdVisible[$key] = $false
+    $script:cmdHandles[$key] = [IntPtr]::Zero
 
-    # Only update icon/tooltip, NOT the menu (menu is rebuilt on next click)
     Update-TrayIcon
     if (-not $quiet) {
         $script:tray.ShowBalloonTip(2000, "Started", $svc.Label, [System.Windows.Forms.ToolTipIcon]::Info)
@@ -381,6 +396,16 @@ function Get-ConsoleHandle([string]$key) {
             if ($hWnd -and $hWnd -ne [IntPtr]::Zero) {
                 $script:cmdHandles[$key] = $hWnd
             }
+        }
+        # Fallback: Get-Process MainWindowHandle (Windows Terminal 환경에서 필요)
+        if ((-not $hWnd -or $hWnd -eq [IntPtr]::Zero) -and $script:cmdPids[$key]) {
+            try {
+                $proc = Get-Process -Id $script:cmdPids[$key] -ErrorAction SilentlyContinue
+                if ($proc -and $proc.MainWindowHandle -ne [IntPtr]::Zero) {
+                    $hWnd = $proc.MainWindowHandle
+                    $script:cmdHandles[$key] = $hWnd
+                }
+            } catch {}
         }
     }
     return $hWnd
@@ -474,7 +499,7 @@ $script:menuServiceItems = @{}  # key → ToolStripMenuItem reference for live u
 
 function Get-ServiceStatus([string]$key) {
     $svc = $script:services[$key]
-    $active = Test-PortActive $svc.Port
+    $active = (Find-ActivePort $key) -gt 0
     $isStarting = $script:startingSet[$key] -eq $true
     $isError = $script:errorSet[$key] -eq $true
     if ($isError) {
@@ -605,7 +630,7 @@ function Build-TrayMenu {
 
 function Add-ServiceMenuItems($menu, [string]$key) {
     $svc = $script:services[$key]
-    $active = Test-PortActive $svc.Port
+    $active = (Find-ActivePort $key) -gt 0
     $st = Get-ServiceStatus $key
 
     $item = New-Object System.Windows.Forms.ToolStripMenuItem
@@ -967,7 +992,7 @@ function Show-SettingsForm {
 function Update-Dashboard {
     foreach ($key in $script:services.Keys) {
         $svc = $script:services[$key]
-        $active = Test-PortActive $svc.Port
+        $active = (Find-ActivePort $key) -gt 0
         $isStarting = $script:startingSet[$key] -eq $true
 
         $lbl = $script:dashLabels[$key]
@@ -1076,7 +1101,7 @@ $script:timer.Add_Tick({
     # Clean up startingSet: port is now active → no longer "Starting"
     $removeKeys = @()
     foreach ($k in @($script:startingSet.Keys)) {
-        if (Test-PortActive $script:services[$k].Port) {
+        if ((Find-ActivePort $k) -gt 0) {
             $removeKeys += $k
             # Save startup duration to history
             if ($script:startTimes[$k]) {
@@ -1095,7 +1120,7 @@ $script:timer.Add_Tick({
     # Error detection: port drop + startup timeout
     foreach ($k in $script:services.Keys) {
         if ($script:errorSet[$k]) { continue }
-        $portActive = Test-PortActive $script:services[$k].Port
+        $portActive = (Find-ActivePort $k) -gt 0
         $isStarting = $script:startingSet[$k] -eq $true
 
         # Track "was running" (port was active at some point)
