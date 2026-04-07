@@ -1,13 +1,13 @@
 ﻿#Requires -Version 5.1
 <#
 .SYNOPSIS  Dev Server Launcher - System Tray
-.VERSION   1.0.1
+.VERSION   1.1.0
 .NOTES     DevLauncher.bat 더블클릭으로 실행
            트레이 아이콘 우클릭 → 서비스 시작/중지
            각 서비스는 별도 cmd 창에서 실행 (로그 확인 가능)
 #>
 
-$script:AppVersion = "1.0.1"
+$script:AppVersion = "1.1.0"
 
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
@@ -798,6 +798,163 @@ $btnSettings.Add_Click({ Show-SettingsForm })
 $script:dashboard.Controls.Add($btnSettings)
 
 # ═══════════════════════════════════════════════
+# Hot-reload: config → services → dashboard UI
+# ═══════════════════════════════════════════════
+function Reload-Services {
+    try {
+        $configJson = Get-Content $script:configPath -Raw -Encoding UTF8 | ConvertFrom-Json
+        $newServices = [ordered]@{}
+        foreach ($svc in $configJson) {
+            $group = if ($svc.group) { $svc.group } else { "" }
+            $newServices[$svc.key] = @{
+                Label = "$($svc.short) :$($svc.port)"
+                Short = $svc.short
+                Port  = [int]$svc.port
+                Dir   = $svc.dir
+                Cmd   = $svc.cmd
+                Group = $group
+            }
+        }
+        # Clean up removed services
+        foreach ($k in @($script:services.Keys)) {
+            if (-not $newServices.Contains($k)) {
+                if ($script:cmdPids[$k]) {
+                    try { & taskkill /F /T /PID $script:cmdPids[$k] 2>$null | Out-Null } catch {}
+                }
+                $script:cmdPids.Remove($k)
+                $script:cmdTitles.Remove($k)
+                $script:cmdHandles.Remove($k)
+                $script:cmdVisible.Remove($k)
+                $script:startingSet.Remove($k)
+                $script:startTimes.Remove($k)
+                $script:errorSet.Remove($k)
+                $script:wasRunning.Remove($k)
+            }
+        }
+        $script:services = $newServices
+    } catch {
+        [System.Windows.Forms.MessageBox]::Show(
+            "Failed to reload config: $($_.Exception.Message)",
+            "Settings", "OK", "Error")
+    }
+}
+
+function Rebuild-DashboardUI {
+    $script:dashboard.SuspendLayout()
+    $script:dashboard.Controls.Clear()
+    $script:dashLabels = @{}
+    $script:dashBtns = @{}
+
+    $y = 10
+    foreach ($key in $script:services.Keys) {
+        $svc = $script:services[$key]
+
+        $lbl = New-Object System.Windows.Forms.Label
+        $lbl.Location = New-Object System.Drawing.Point(14, ($y + 4))
+        $lbl.Size = New-Object System.Drawing.Size(310, 20)
+        $lbl.Font = New-Object System.Drawing.Font("Consolas", 9)
+        $script:dashboard.Controls.Add($lbl)
+        $script:dashLabels[$key] = $lbl
+
+        $btnStart = New-Object System.Windows.Forms.Button
+        $btnStart.Location = New-Object System.Drawing.Point(325, $y)
+        $btnStart.Size = New-Object System.Drawing.Size(55, 26)
+        $btnStart.Text = "Start"
+        $btnStart.Tag = $key
+        $btnStart.FlatStyle = "Flat"
+        $btnStart.Add_Click({ Start-Svc $this.Tag; Update-Dashboard })
+        $script:dashboard.Controls.Add($btnStart)
+
+        $btnStop = New-Object System.Windows.Forms.Button
+        $btnStop.Location = New-Object System.Drawing.Point(385, $y)
+        $btnStop.Size = New-Object System.Drawing.Size(50, 26)
+        $btnStop.Text = "Stop"
+        $btnStop.Tag = $key
+        $btnStop.FlatStyle = "Flat"
+        $btnStop.Add_Click({ Stop-Svc $this.Tag; Update-Dashboard })
+        $script:dashboard.Controls.Add($btnStop)
+
+        $btnCon = New-Object System.Windows.Forms.Button
+        $btnCon.Location = New-Object System.Drawing.Point(440, $y)
+        $btnCon.Size = New-Object System.Drawing.Size(45, 26)
+        $btnCon.Text = "Cmd"
+        $btnCon.Tag = $key
+        $btnCon.FlatStyle = "Flat"
+        $btnCon.Add_Click({ Toggle-Console $this.Tag; Update-Dashboard })
+        $script:dashboard.Controls.Add($btnCon)
+
+        $script:dashBtns[$key] = @{ Start = $btnStart; Stop = $btnStop; Console = $btnCon }
+        $y += 34
+    }
+
+    # Bottom buttons
+    $y += 6
+    $btnAll = New-Object System.Windows.Forms.Button
+    $btnAll.Location = New-Object System.Drawing.Point(14, $y)
+    $btnAll.Size = New-Object System.Drawing.Size(80, 30)
+    $btnAll.Text = "All Start"
+    $btnAll.FlatStyle = "Flat"
+    $btnAll.ForeColor = [System.Drawing.Color]::FromArgb(37, 99, 235)
+    $btnAll.Add_Click({
+        if ($script:startQueue.Count -gt 0 -or $script:startingSet.Count -gt 0) { return }
+        $script:startQueue = [System.Collections.ArrayList]@($script:services.Keys)
+        $script:startTotal = $script:startQueue.Count
+        $script:startingSet = @{}
+        foreach ($k in $script:services.Keys) { $script:startingSet[$k] = $true }
+        $script:startTimer.Start()
+        Update-Dashboard
+    })
+    $script:dashboard.Controls.Add($btnAll)
+    $script:btnAllStart = $btnAll
+
+    $btnStopAll = New-Object System.Windows.Forms.Button
+    $btnStopAll.Location = New-Object System.Drawing.Point(100, $y)
+    $btnStopAll.Size = New-Object System.Drawing.Size(80, 30)
+    $btnStopAll.Text = "All Stop"
+    $btnStopAll.FlatStyle = "Flat"
+    $btnStopAll.ForeColor = [System.Drawing.Color]::FromArgb(220, 38, 38)
+    $btnStopAll.Add_Click({
+        $script:startQueue.Clear()
+        $script:startTimer.Stop()
+        foreach ($k in $script:services.Keys) { Stop-Svc $k $true }
+        Update-Dashboard
+    })
+    $script:dashboard.Controls.Add($btnStopAll)
+
+    $script:btnToggleCmd = New-Object System.Windows.Forms.Button
+    $script:btnToggleCmd.Location = New-Object System.Drawing.Point(210, $y)
+    $script:btnToggleCmd.Size = New-Object System.Drawing.Size(90, 30)
+    $script:btnToggleCmd.Text = "Show Cmd"
+    $script:btnToggleCmd.FlatStyle = "Flat"
+    $script:btnToggleCmd.Add_Click({
+        $anyVisible = $false
+        foreach ($k in $script:services.Keys) {
+            if (Test-ConsoleVisible $k) { $anyVisible = $true; break }
+        }
+        if ($anyVisible) { Hide-AllConsoles } else { Show-AllConsoles }
+        Update-Dashboard
+    })
+    $script:dashboard.Controls.Add($script:btnToggleCmd)
+
+    $btnSettings = New-Object System.Windows.Forms.Button
+    $btnSettings.Location = New-Object System.Drawing.Point(420, $y)
+    $btnSettings.Size = New-Object System.Drawing.Size(60, 30)
+    $btnSettings.Text = [char]0x2699 + " Edit"
+    $btnSettings.FlatStyle = "Flat"
+    $btnSettings.ForeColor = [System.Drawing.Color]::FromArgb(107, 114, 128)
+    $btnSettings.Add_Click({ Show-SettingsForm })
+    $script:dashboard.Controls.Add($btnSettings)
+
+    # Resize form
+    $script:dashContentHeight = 10 + ($script:services.Count * 34) + 6 + 30 + 16
+    $script:dashboard.Size = New-Object System.Drawing.Size(510, ($script:dashContentHeight + 40))
+    $script:dashboard.Text = "Dev Server Launcher v$($script:AppVersion)"
+
+    $script:dashboard.ResumeLayout()
+    Update-Dashboard
+}
+
+# ═══════════════════════════════════════════════
 # Settings Form
 # ═══════════════════════════════════════════════
 function Show-SettingsForm {
@@ -970,9 +1127,9 @@ function Show-SettingsForm {
             return
         }
         $newConfig | ConvertTo-Json -Depth 3 | Set-Content $script:configPath -Encoding UTF8
-        [System.Windows.Forms.MessageBox]::Show(
-            "Saved. Restart DevLauncher to apply changes.",
-            "Settings", "OK", "Information")
+        Reload-Services
+        Rebuild-DashboardUI
+        $script:tray.ContextMenuStrip = Build-TrayMenu
         $form.Close()
     })
     $form.Controls.Add($btnSave)
@@ -1117,6 +1274,27 @@ $script:timer.Add_Tick({
         try { $script:startHistory | ConvertTo-Json | Set-Content $script:historyPath -Encoding UTF8 } catch {}
     }
 
+    # Process death detection: cmd window closed → clean stop
+    foreach ($k in @($script:cmdPids.Keys)) {
+        if (-not $script:cmdPids[$k]) { continue }
+        $proc = $null
+        try { $proc = Get-Process -Id $script:cmdPids[$k] -ErrorAction SilentlyContinue } catch {}
+        if (-not $proc) {
+            $portActive = (Find-ActivePort $k) -gt 0
+            $script:cmdPids[$k] = $null
+            $script:cmdTitles[$k] = $null
+            $script:cmdHandles[$k] = [IntPtr]::Zero
+            $script:cmdVisible[$k] = $false
+            $script:startingSet.Remove($k)
+            $script:startTimes.Remove($k)
+            if (-not $portActive) {
+                # Process dead + port down = clean stop (not error)
+                $script:wasRunning.Remove($k)
+                $script:errorSet.Remove($k)
+            }
+        }
+    }
+
     # Error detection: port drop + startup timeout
     foreach ($k in $script:services.Keys) {
         if ($script:errorSet[$k]) { continue }
@@ -1126,7 +1304,7 @@ $script:timer.Add_Tick({
         # Track "was running" (port was active at some point)
         if ($portActive) { $script:wasRunning[$k] = $true }
 
-        # Port drop: was running but port went down
+        # Port drop: was running but port went down (process still tracked = unexpected crash)
         if ($script:wasRunning[$k] -and -not $portActive -and -not $isStarting) {
             $script:errorSet[$k] = $true
             $script:wasRunning.Remove($k)
