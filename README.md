@@ -1,7 +1,12 @@
 # Dev Server Launcher
 
-A lightweight Windows tray app + CLI for managing multiple development servers.  
-Start, stop, monitor, and read logs — from GUI, terminal, or **AI coding assistants like Claude Code**.
+Windows development server process manager with system tray GUI and full CLI.  
+Manage Spring Boot, Vite, Node.js, npm, and any dev server from one place.
+
+**AI-ready**: Full CLI interface for [Claude Code](https://claude.ai/claude-code), [Cursor](https://cursor.com), GitHub Copilot, and other AI coding assistants. Start/stop servers, read logs, edit config — all from the command line without opening the GUI.
+
+[![GitHub release](https://img.shields.io/github/v/release/DreamingStrawberry/dev-server-launcher)](https://github.com/DreamingStrawberry/dev-server-launcher/releases)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 ## Quick Start
 
@@ -124,25 +129,65 @@ On first run, `DevLauncher.config.json` is created with example services:
 | `dir` | Working directory |
 | `cmd` | Command to execute |
 
-## Using with Claude Code
+## AI / Claude Code Integration
 
-Claude Code can fully control Dev Server Launcher via CLI. Example workflow:
+Dev Server Launcher is designed to be fully controllable by AI coding assistants.  
+No GUI interaction needed — every operation is available via CLI.
+
+### Why this matters
+
+When AI assistants (Claude Code, Cursor, Copilot) work on your code, they often need to:
+- **Start a backend** before testing API changes
+- **Read server logs** to diagnose build errors or runtime exceptions
+- **Restart services** after modifying configuration
+- **Check if a port is in use** before starting a new server
+
+Dev Server Launcher gives AI assistants a **single CLI interface** to do all of this.
+
+### Example: Claude Code on WSL
 
 ```bash
 # Check what's running
 cmd.exe /c "C:\Users\YOU\DevLauncher.bat status"
+# ● mw-back    MW-Back   :8080  Running
+# ○ mw-react   MW-React  :5190  Stopped
 
-# Start the backend you need
+# Start the backend
 cmd.exe /c "C:\Users\YOU\DevLauncher.bat start my-backend"
 
 # Read Spring Boot startup logs to check for errors
 cmd.exe /c "C:\Users\YOU\DevLauncher.bat logs my-backend 100"
 
-# Add a new service for a new project
-cmd.exe /c "C:\Users\YOU\DevLauncher.bat add new-api NewProject API 8090 D:\Projects\new-app ""mvnw.cmd spring-boot:run"""
+# Add a new service
+cmd.exe /c "C:\Users\YOU\DevLauncher.bat add new-api NewProject API 8090 D:\Projects\new ""mvnw.cmd spring-boot:run"""
 
-# Update the launcher itself
+# Edit config
+cmd.exe /c "C:\Users\YOU\DevLauncher.bat edit my-backend port 8081"
+
+# Restart after config change
+cmd.exe /c "C:\Users\YOU\DevLauncher.bat restart my-backend"
+
+# Self-update to latest version
 cmd.exe /c "C:\Users\YOU\DevLauncher.bat update"
+```
+
+### Example: PowerShell / CMD
+
+```powershell
+DevLauncher.bat status
+DevLauncher.bat start all
+DevLauncher.bat logs my-backend
+DevLauncher.bat stop all
+```
+
+### Tip for AI assistant users
+
+Add DevLauncher's path to your project's AI instructions (e.g., `CLAUDE.md`):
+
+```markdown
+## Dev Server
+Use `cmd.exe /c "C:\Users\YOU\DevLauncher.bat <command>"` to manage dev servers.
+Available commands: status, start, stop, restart, logs, config, add, edit, remove, update, quit
 ```
 
 ## Requirements
@@ -171,3 +216,7 @@ logs/                       # Service output logs (gitignored)
 ## License
 
 [MIT](LICENSE)
+
+---
+
+<sub>**Keywords**: Windows dev server manager, development server launcher, Spring Boot process manager, Vite server manager, npm dev server, PowerShell system tray, CLI server control, Claude Code dev tools, AI assistant server management, Windows service manager for developers, port monitoring, multi-server launcher, conhost process manager, developer workflow automation</sub>
