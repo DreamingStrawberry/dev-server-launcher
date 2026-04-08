@@ -1,13 +1,149 @@
 ﻿#Requires -Version 5.1
 <#
 .SYNOPSIS  Dev Server Launcher - System Tray
-.VERSION   1.1.0
+.VERSION   1.2.0
 .NOTES     DevLauncher.bat 더블클릭으로 실행
            트레이 아이콘 우클릭 → 서비스 시작/중지
            각 서비스는 별도 cmd 창에서 실행 (로그 확인 가능)
 #>
 
-$script:AppVersion = "1.1.0"
+$script:AppVersion = "1.2.0"
+
+# ═══════════════════════════════════════════════
+# CLI Mode (args present → no GUI, execute and exit)
+# ═══════════════════════════════════════════════
+if ($args.Count -gt 0) {
+    $cfgPath = Join-Path $PSScriptRoot "DevLauncher.config.json"
+    if (-not (Test-Path $cfgPath)) {
+        Write-Host "ERROR: DevLauncher.config.json not found. Run DevLauncher.bat once to generate." -ForegroundColor Red
+        exit 1
+    }
+    $svcs = [ordered]@{}
+    try {
+        $json = Get-Content $cfgPath -Raw -Encoding UTF8 | ConvertFrom-Json
+        foreach ($s in $json) { $svcs[$s.key] = $s }
+    } catch {
+        Write-Host "ERROR: Failed to parse config - $($_.Exception.Message)" -ForegroundColor Red
+        exit 1
+    }
+
+    function CLI-GetPortPid([int]$port) {
+        $lines = @(netstat -ano 2>$null | Select-String ":${port}\s.*LISTENING")
+        foreach ($line in $lines) {
+            $parts = $line.Line.Trim() -split '\s+'
+            $procId = [int]$parts[-1]
+            if ($procId -gt 0) { return $procId }
+        }
+        return 0
+    }
+    function CLI-TestPort([int]$port) { return (CLI-GetPortPid $port) -gt 0 }
+
+    function CLI-Status {
+        $maxKey = ($svcs.Keys | ForEach-Object { $_.Length } | Measure-Object -Maximum).Maximum
+        $maxShort = ($svcs.Values | ForEach-Object { $_.short.Length } | Measure-Object -Maximum).Maximum
+        foreach ($key in $svcs.Keys) {
+            $s = $svcs[$key]
+            $active = CLI-TestPort ([int]$s.port)
+            $status = if ($active) { "Running" } else { "Stopped" }
+            $color  = if ($active) { "Green" } else { "Gray" }
+            $dot    = if ($active) { [char]0x25CF } else { [char]0x25CB }
+            Write-Host ("{0}  {1}  {2}  :{3,-5}  {4}" -f $dot, $key.PadRight($maxKey), $s.short.PadRight($maxShort), $s.port, $status) -ForegroundColor $color
+        }
+    }
+
+    function CLI-Start([string]$key) {
+        if (-not $svcs.Contains($key)) {
+            Write-Host "ERROR: Unknown service '$key'. Use 'list' to see available keys." -ForegroundColor Red
+            return $false
+        }
+        $s = $svcs[$key]
+        $port = [int]$s.port
+        if (CLI-TestPort $port) {
+            Write-Host "$($s.short) :$port already running." -ForegroundColor Yellow
+            return $true
+        }
+        # Kill port occupant if any
+        $pid = CLI-GetPortPid $port
+        if ($pid -gt 0) { & taskkill /F /T /PID $pid 2>$null | Out-Null }
+        $title = "DevLauncher_$($s.short)_$port"
+        $fullCmd = "title $title && cd /d $($s.dir) && $($s.cmd)"
+        Start-Process -FilePath "conhost.exe" -ArgumentList "cmd.exe /k $fullCmd" -WindowStyle Hidden
+        Write-Host "$($s.short) :$port starting..." -ForegroundColor Cyan
+        return $true
+    }
+
+    function CLI-Stop([string]$key) {
+        if (-not $svcs.Contains($key)) {
+            Write-Host "ERROR: Unknown service '$key'. Use 'list' to see available keys." -ForegroundColor Red
+            return $false
+        }
+        $s = $svcs[$key]
+        $port = [int]$s.port
+        $pid = CLI-GetPortPid $port
+        if ($pid -gt 0) {
+            & taskkill /F /T /PID $pid 2>$null | Out-Null
+            Write-Host "$($s.short) :$port stopped." -ForegroundColor Green
+        } else {
+            Write-Host "$($s.short) :$port not running." -ForegroundColor Gray
+        }
+        # Also kill by window title
+        $title = "DevLauncher_$($s.short)_$port"
+        $procs = Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowTitle -match $title }
+        foreach ($p in $procs) { try { Stop-Process -Id $p.Id -Force 2>$null } catch {} }
+        return $true
+    }
+
+    $cmd = $args[0].ToLower()
+    $target = if ($args.Count -gt 1) { $args[1] } else { $null }
+
+    switch ($cmd) {
+        "status" { CLI-Status }
+        "list"   { $svcs.Keys | ForEach-Object { Write-Host $_ } }
+        "start"  {
+            if (-not $target) {
+                Write-Host "Usage: DevLauncher.bat start <key|all>" -ForegroundColor Yellow
+            } elseif ($target -eq "all") {
+                foreach ($k in $svcs.Keys) { CLI-Start $k }
+            } else {
+                CLI-Start $target
+            }
+        }
+        "stop" {
+            if (-not $target) {
+                Write-Host "Usage: DevLauncher.bat stop <key|all>" -ForegroundColor Yellow
+            } elseif ($target -eq "all") {
+                foreach ($k in $svcs.Keys) { CLI-Stop $k }
+            } else {
+                CLI-Stop $target
+            }
+        }
+        "restart" {
+            if (-not $target) {
+                Write-Host "Usage: DevLauncher.bat restart <key|all>" -ForegroundColor Yellow
+            } elseif ($target -eq "all") {
+                foreach ($k in $svcs.Keys) { CLI-Stop $k; CLI-Start $k }
+            } else {
+                CLI-Stop $target; CLI-Start $target
+            }
+        }
+        "help" {
+            Write-Host "Dev Server Launcher v$script:AppVersion - CLI" -ForegroundColor Cyan
+            Write-Host ""
+            Write-Host "  DevLauncher.bat                Open GUI (tray + dashboard)"
+            Write-Host "  DevLauncher.bat status         Show all service statuses"
+            Write-Host "  DevLauncher.bat list           List service keys"
+            Write-Host "  DevLauncher.bat start <key>    Start a service (or 'all')"
+            Write-Host "  DevLauncher.bat stop <key>     Stop a service (or 'all')"
+            Write-Host "  DevLauncher.bat restart <key>  Restart a service (or 'all')"
+            Write-Host "  DevLauncher.bat help           Show this help"
+        }
+        default {
+            Write-Host "Unknown command: $cmd. Use 'help' for usage." -ForegroundColor Red
+            exit 1
+        }
+    }
+    exit 0
+}
 
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
