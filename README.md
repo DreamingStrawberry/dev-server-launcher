@@ -217,6 +217,3 @@ logs/                       # Service output logs (gitignored)
 
 [MIT](LICENSE)
 
----
-
-<sub>**Keywords**: Windows dev server manager, development server launcher, Spring Boot process manager, Vite server manager, npm dev server, PowerShell system tray, CLI server control, Claude Code dev tools, AI assistant server management, Windows service manager for developers, port monitoring, multi-server launcher, conhost process manager, developer workflow automation</sub>
