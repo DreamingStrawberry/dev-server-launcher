@@ -1,13 +1,13 @@
 ﻿#Requires -Version 5.1
 <#
 .SYNOPSIS  Dev Server Launcher - System Tray
-.VERSION   1.4.0
+.VERSION   1.5.0
 .NOTES     DevLauncher.bat 더블클릭으로 실행
            트레이 아이콘 우클릭 → 서비스 시작/중지
            각 서비스는 별도 cmd 창에서 실행 (로그 확인 가능)
 #>
 
-$script:AppVersion = "1.4.0"
+$script:AppVersion = "1.5.0"
 
 # ═══════════════════════════════════════════════
 # CLI Mode (args present → no GUI, execute and exit)
@@ -51,6 +51,12 @@ if ($args.Count -gt 0) {
         }
     }
 
+    function CLI-EnsureLogDir {
+        $d = Join-Path $PSScriptRoot "logs"
+        if (-not (Test-Path $d)) { New-Item $d -ItemType Directory -Force | Out-Null }
+        return $d
+    }
+
     function CLI-Start([string]$key) {
         if (-not $svcs.Contains($key)) {
             Write-Host "ERROR: Unknown service '$key'. Use 'list' to see available keys." -ForegroundColor Red
@@ -66,9 +72,19 @@ if ($args.Count -gt 0) {
         $procId = CLI-GetPortPid $port
         if ($procId -gt 0) { & taskkill /F /T /PID $procId 2>$null | Out-Null }
         $title = "DevLauncher_$($s.short)_$port"
-        $fullCmd = "title $title && cd /d $($s.dir) && $($s.cmd)"
-        Start-Process -FilePath "conhost.exe" -ArgumentList "cmd.exe /k $fullCmd" -WindowStyle Hidden
-        Write-Host "$($s.short) :$port starting..." -ForegroundColor Cyan
+        $logDir = CLI-EnsureLogDir
+        $logFile = Join-Path $logDir "$key.log"
+        # Create launcher script that tees output to log file
+        $launcher = Join-Path $logDir "_run_$key.ps1"
+        @"
+`$host.UI.RawUI.WindowTitle = '$title'
+'' | Set-Content '$logFile'
+& cmd /c 'cd /d $($s.dir) && $($s.cmd)' 2>&1 | ForEach-Object { Write-Host `$_; Add-Content '$logFile' `$_ }
+Write-Host '--- Process exited ---' -ForegroundColor Red
+Read-Host 'Press Enter to close'
+"@ | Set-Content $launcher -Encoding UTF8
+        Start-Process -FilePath "conhost.exe" -ArgumentList "powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$launcher`"" -WindowStyle Hidden
+        Write-Host "$($s.short) :$port starting... (log: logs/$key.log)" -ForegroundColor Cyan
         return
     }
 
@@ -295,6 +311,31 @@ if ($args.Count -gt 0) {
             }
         }
         "edit"    { CLI-Edit }
+        "logs" {
+            $logDir = Join-Path $PSScriptRoot "logs"
+            $lines = if ($args.Count -gt 2) { [int]$args[2] } else { 50 }
+            if (-not $target) {
+                # Show last few lines of all logs
+                foreach ($k in $svcs.Keys) {
+                    $lf = Join-Path $logDir "$k.log"
+                    if (Test-Path $lf) {
+                        $content = Get-Content $lf -Tail 5 -EA SilentlyContinue
+                        if ($content) {
+                            Write-Host "=== $k ===" -ForegroundColor Cyan
+                            $content | ForEach-Object { Write-Host $_ }
+                            Write-Host ""
+                        }
+                    }
+                }
+            } else {
+                $lf = Join-Path $logDir "$target.log"
+                if (-not (Test-Path $lf)) {
+                    Write-Host "No log file for '$target'. Start the service first." -ForegroundColor Yellow
+                } else {
+                    Get-Content $lf -Tail $lines -EA SilentlyContinue
+                }
+            }
+        }
         "quit"    { CLI-Quit }
         "update"  { CLI-DoUpdate }
         "version" {
@@ -317,6 +358,11 @@ if ($args.Count -gt 0) {
             Write-Host "    remove <key>         Remove a service"
             Write-Host "    edit <key> <field> <value>"
             Write-Host "                         Fields: group, short, port, dir, cmd"
+            Write-Host ""
+            Write-Host ""
+            Write-Host "  Logs:" -ForegroundColor White
+            Write-Host "    logs                 Show recent logs for all services"
+            Write-Host "    logs <key> [N]       Show last N lines (default: 50)"
             Write-Host ""
             Write-Host "  System:" -ForegroundColor White
             Write-Host "    update               Check and apply latest update"
@@ -665,12 +711,26 @@ function Start-Svc([string]$key, [bool]$quiet = $false) {
         $portWasActive = $true
     }
 
-    # If port was occupied, wait inside cmd for release (doesn't block UI thread)
-    $delaySuffix = if ($portWasActive) { " && ping -n 4 127.0.0.1 >nul 2>&1" } else { "" }
-    $fullCmd = "title $title && cd /d $($svc.Dir)$delaySuffix && $($svc.Cmd)"
+    # Log directory + file
+    $logDir = Join-Path $PSScriptRoot "logs"
+    if (-not (Test-Path $logDir)) { New-Item $logDir -ItemType Directory -Force | Out-Null }
+    $logFile = Join-Path $logDir "$key.log"
+
+    # If port was occupied, wait inside launcher for release
+    $delaySuffix = if ($portWasActive) { "; Start-Sleep -Seconds 3" } else { "" }
+
+    # Create launcher script: tee output to both console and log file
+    $launcher = Join-Path $logDir "_run_$key.ps1"
+    @"
+`$host.UI.RawUI.WindowTitle = '$title'
+'' | Set-Content '$logFile'$delaySuffix
+& cmd /c 'cd /d $($svc.Dir) && $($svc.Cmd)' 2>&1 | ForEach-Object { Write-Host `$_; Add-Content '$logFile' `$_ }
+Write-Host '--- Process exited ---' -ForegroundColor Red
+Read-Host 'Press Enter to close'
+"@ | Set-Content $launcher -Encoding UTF8
 
     # conhost.exe로 직접 실행 (Windows Terminal 우회 → Hidden 정상 동작)
-    $proc = Start-Process -FilePath "conhost.exe" -ArgumentList "cmd.exe /k $fullCmd" -WindowStyle Hidden -PassThru
+    $proc = Start-Process -FilePath "conhost.exe" -ArgumentList "powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$launcher`"" -WindowStyle Hidden -PassThru
     $script:cmdPids[$key] = $proc.Id
     $script:cmdTitles[$key] = $title
     $script:startingSet[$key] = $true
