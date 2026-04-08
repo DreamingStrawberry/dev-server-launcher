@@ -1,13 +1,13 @@
 ﻿#Requires -Version 5.1
 <#
 .SYNOPSIS  Dev Server Launcher - System Tray
-.VERSION   1.3.0
+.VERSION   1.4.0
 .NOTES     DevLauncher.bat 더블클릭으로 실행
            트레이 아이콘 우클릭 → 서비스 시작/중지
            각 서비스는 별도 cmd 창에서 실행 (로그 확인 가능)
 #>
 
-$script:AppVersion = "1.3.0"
+$script:AppVersion = "1.4.0"
 
 # ═══════════════════════════════════════════════
 # CLI Mode (args present → no GUI, execute and exit)
@@ -54,34 +54,34 @@ if ($args.Count -gt 0) {
     function CLI-Start([string]$key) {
         if (-not $svcs.Contains($key)) {
             Write-Host "ERROR: Unknown service '$key'. Use 'list' to see available keys." -ForegroundColor Red
-            return $false
+            return
         }
         $s = $svcs[$key]
         $port = [int]$s.port
         if (CLI-TestPort $port) {
             Write-Host "$($s.short) :$port already running." -ForegroundColor Yellow
-            return $true
+            return
         }
         # Kill port occupant if any
-        $pid = CLI-GetPortPid $port
-        if ($pid -gt 0) { & taskkill /F /T /PID $pid 2>$null | Out-Null }
+        $procId = CLI-GetPortPid $port
+        if ($procId -gt 0) { & taskkill /F /T /PID $procId 2>$null | Out-Null }
         $title = "DevLauncher_$($s.short)_$port"
         $fullCmd = "title $title && cd /d $($s.dir) && $($s.cmd)"
         Start-Process -FilePath "conhost.exe" -ArgumentList "cmd.exe /k $fullCmd" -WindowStyle Hidden
         Write-Host "$($s.short) :$port starting..." -ForegroundColor Cyan
-        return $true
+        return
     }
 
     function CLI-Stop([string]$key) {
         if (-not $svcs.Contains($key)) {
             Write-Host "ERROR: Unknown service '$key'. Use 'list' to see available keys." -ForegroundColor Red
-            return $false
+            return
         }
         $s = $svcs[$key]
         $port = [int]$s.port
-        $pid = CLI-GetPortPid $port
-        if ($pid -gt 0) {
-            & taskkill /F /T /PID $pid 2>$null | Out-Null
+        $procId = CLI-GetPortPid $port
+        if ($procId -gt 0) {
+            & taskkill /F /T /PID $procId 2>$null | Out-Null
             Write-Host "$($s.short) :$port stopped." -ForegroundColor Green
         } else {
             Write-Host "$($s.short) :$port not running." -ForegroundColor Gray
@@ -90,7 +90,7 @@ if ($args.Count -gt 0) {
         $title = "DevLauncher_$($s.short)_$port"
         $procs = Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowTitle -match $title }
         foreach ($p in $procs) { try { Stop-Process -Id $p.Id -Force 2>$null } catch {} }
-        return $true
+        return
     }
 
     # ── Config edit helpers ──
@@ -173,11 +173,73 @@ if ($args.Count -gt 0) {
         Write-Host "Updated: $key.$field = $val (was: $old)" -ForegroundColor Green
     }
 
+    $script:GH_REPO = "DreamingStrawberry/dev-server-launcher"
+
+    function CLI-CheckUpdate([bool]$quiet = $false) {
+        # Returns: $null (up-to-date/error) or hashtable {tag, url, notes}
+        try {
+            $release = Invoke-RestMethod "https://api.github.com/repos/$script:GH_REPO/releases/latest" -TimeoutSec 5 -EA Stop
+            $latest = $release.tag_name -replace '^v', ''
+            $current = $script:AppVersion
+            if ([version]$latest -gt [version]$current) {
+                $asset = $release.assets | Where-Object { $_.name -match '\.zip$' } | Select-Object -First 1
+                if (-not $asset) { return $null }
+                return @{ tag = $release.tag_name; version = $latest; url = $asset.browser_download_url; notes = $release.body }
+            } else {
+                if (-not $quiet) { Write-Host "Already up to date (v$current)." -ForegroundColor Green }
+                return $null
+            }
+        } catch {
+            if (-not $quiet) { Write-Host "ERROR: Failed to check update - $($_.Exception.Message)" -ForegroundColor Red }
+            return $null
+        }
+    }
+
+    function CLI-DoUpdate {
+        $info = CLI-CheckUpdate $true
+        if (-not $info) {
+            Write-Host "Already up to date (v$script:AppVersion)." -ForegroundColor Green
+            return
+        }
+        Write-Host "Update available: v$($script:AppVersion) -> $($info.tag)" -ForegroundColor Cyan
+        Write-Host $info.notes -ForegroundColor Gray
+        Write-Host ""
+
+        $zipPath = Join-Path $env:TEMP "DevLauncher-update.zip"
+        $extractDir = Join-Path $env:TEMP "DevLauncher-update"
+
+        try {
+            Write-Host "Downloading..." -ForegroundColor Yellow -NoNewline
+            Invoke-WebRequest $info.url -OutFile $zipPath -TimeoutSec 30 -EA Stop
+            Write-Host " OK" -ForegroundColor Green
+
+            # Extract
+            if (Test-Path $extractDir) { Remove-Item $extractDir -Recurse -Force }
+            Expand-Archive $zipPath -DestinationPath $extractDir -Force
+
+            # Copy files (bat, ps1, ico) to script directory
+            $updated = @()
+            foreach ($f in Get-ChildItem $extractDir -File) {
+                $dest = Join-Path $PSScriptRoot $f.Name
+                Copy-Item $f.FullName $dest -Force
+                $updated += $f.Name
+            }
+            Write-Host "Updated: $($updated -join ', ')" -ForegroundColor Green
+            Write-Host "Restart DevLauncher to use v$($info.version)." -ForegroundColor Cyan
+        } catch {
+            Write-Host " FAILED" -ForegroundColor Red
+            Write-Host "ERROR: $($_.Exception.Message)" -ForegroundColor Red
+        } finally {
+            Remove-Item $zipPath -Force -EA SilentlyContinue
+            Remove-Item $extractDir -Recurse -Force -EA SilentlyContinue
+        }
+    }
+
     function CLI-Quit {
         $killed = $false
         # Find DevLauncher GUI processes (PowerShell running DevLauncher.ps1 without CLI args)
         $procs = Get-CimInstance Win32_Process -Filter "name='powershell.exe'" -EA SilentlyContinue |
-            Where-Object { $_.ProcessId -ne $PID -and $_.CommandLine -match 'DevLauncher\.ps1' -and $_.CommandLine -notmatch '\s(status|start|stop|restart|list|help|config|add|remove|edit|quit)' }
+            Where-Object { $_.ProcessId -ne $PID -and $_.CommandLine -match 'DevLauncher\.ps1' -and $_.CommandLine -notmatch '\s(status|start|stop|restart|list|help|config|add|remove|edit|quit|update|version)' }
         foreach ($p in $procs) {
             Stop-Process -Id $p.ProcessId -Force -EA SilentlyContinue
             $killed = $true
@@ -232,8 +294,13 @@ if ($args.Count -gt 0) {
                 CLI-Remove $target
             }
         }
-        "edit"   { CLI-Edit }
-        "quit"   { CLI-Quit }
+        "edit"    { CLI-Edit }
+        "quit"    { CLI-Quit }
+        "update"  { CLI-DoUpdate }
+        "version" {
+            Write-Host "Dev Server Launcher v$script:AppVersion" -ForegroundColor Cyan
+            CLI-CheckUpdate
+        }
         "help" {
             Write-Host "Dev Server Launcher v$script:AppVersion - CLI" -ForegroundColor Cyan
             Write-Host ""
@@ -251,7 +318,9 @@ if ($args.Count -gt 0) {
             Write-Host "    edit <key> <field> <value>"
             Write-Host "                         Fields: group, short, port, dir, cmd"
             Write-Host ""
-            Write-Host "  GUI:" -ForegroundColor White
+            Write-Host "  System:" -ForegroundColor White
+            Write-Host "    update               Check and apply latest update"
+            Write-Host "    version              Show version and check for updates"
             Write-Host "    quit                 Stop the running GUI"
             Write-Host "    (no args)            Launch GUI"
         }
@@ -540,9 +609,9 @@ function Stop-ByPort([int]$port) {
     $procId = Get-PortPid $port
     if ($procId -gt 0) {
         & taskkill /F /T /PID $procId 2>$null | Out-Null
-        return $true
+        return
     }
-    return $false
+    return
 }
 
 # Lightweight: only update tray icon color + tooltip (no menu rebuild)
@@ -691,7 +760,7 @@ function Test-ConsoleVisible([string]$key) {
     if ($hWnd -and $hWnd -ne [IntPtr]::Zero) {
         return [Win32Window]::IsWindowVisible($hWnd)
     }
-    return $false
+    return
 }
 
 function Toggle-Console([string]$key) {
@@ -1639,6 +1708,42 @@ $script:pulseTimer.Add_Tick({
     }
 })
 $script:pulseTimer.Start()
+
+# ═══════════════════════════════════════════════
+# Auto-update check (runs once, 3s after GUI start)
+# ═══════════════════════════════════════════════
+$script:GH_REPO = "DreamingStrawberry/dev-server-launcher"
+$script:updateTimer = New-Object System.Windows.Forms.Timer
+$script:updateTimer.Interval = 3000
+$script:updateTimer.Add_Tick({
+    $script:updateTimer.Stop()
+    try {
+        $release = Invoke-RestMethod "https://api.github.com/repos/$script:GH_REPO/releases/latest" -TimeoutSec 5 -EA Stop
+        $latest = $release.tag_name -replace '^v', ''
+        if ([version]$latest -gt [version]$script:AppVersion) {
+            $asset = $release.assets | Where-Object { $_.name -match '\.zip$' } | Select-Object -First 1
+            if (-not $asset) { return }
+            $script:tray.ShowBalloonTip(5000, "Update Available",
+                "v$($script:AppVersion) -> $($release.tag_name)`nUpdating...",
+                [System.Windows.Forms.ToolTipIcon]::Info)
+            # Download and apply
+            $zipPath = Join-Path $env:TEMP "DevLauncher-update.zip"
+            $extractDir = Join-Path $env:TEMP "DevLauncher-update"
+            Invoke-WebRequest $asset.browser_download_url -OutFile $zipPath -TimeoutSec 30 -EA Stop
+            if (Test-Path $extractDir) { Remove-Item $extractDir -Recurse -Force }
+            Expand-Archive $zipPath -DestinationPath $extractDir -Force
+            foreach ($f in Get-ChildItem $extractDir -File) {
+                Copy-Item $f.FullName (Join-Path $PSScriptRoot $f.Name) -Force
+            }
+            Remove-Item $zipPath -Force -EA SilentlyContinue
+            Remove-Item $extractDir -Recurse -Force -EA SilentlyContinue
+            $script:tray.ShowBalloonTip(4000, "Updated",
+                "$($release.tag_name) applied. Restart to use new version.",
+                [System.Windows.Forms.ToolTipIcon]::Info)
+        }
+    } catch {}
+})
+$script:updateTimer.Start()
 
 # ═══════════════════════════════════════════════
 # Init & Run
