@@ -1,13 +1,13 @@
 ﻿#Requires -Version 5.1
 <#
 .SYNOPSIS  Dev Server Launcher - System Tray
-.VERSION   1.2.0
+.VERSION   1.3.0
 .NOTES     DevLauncher.bat 더블클릭으로 실행
            트레이 아이콘 우클릭 → 서비스 시작/중지
            각 서비스는 별도 cmd 창에서 실행 (로그 확인 가능)
 #>
 
-$script:AppVersion = "1.2.0"
+$script:AppVersion = "1.3.0"
 
 # ═══════════════════════════════════════════════
 # CLI Mode (args present → no GUI, execute and exit)
@@ -93,12 +93,110 @@ if ($args.Count -gt 0) {
         return $true
     }
 
+    # ── Config edit helpers ──
+    function CLI-SaveConfig {
+        $arr = @()
+        foreach ($key in $svcs.Keys) {
+            $s = $svcs[$key]
+            $arr += [ordered]@{ key=$key; group=$s.group; short=$s.short; port=[int]$s.port; dir=$s.dir; cmd=$s.cmd }
+        }
+        $arr | ConvertTo-Json -Depth 3 | Set-Content $cfgPath -Encoding UTF8
+    }
+
+    function CLI-ShowConfig {
+        $maxKey = ($svcs.Keys | ForEach-Object { $_.Length } | Measure-Object -Maximum).Maximum
+        foreach ($key in $svcs.Keys) {
+            $s = $svcs[$key]
+            $active = CLI-TestPort ([int]$s.port)
+            $st = if ($active) { "Running" } else { "Stopped" }
+            $color = if ($active) { "Green" } else { "Gray" }
+            Write-Host ("{0}  group={1}  short={2}  port={3}  dir={4}  cmd={5}  [{6}]" -f $key.PadRight($maxKey), $s.group, $s.short, $s.port, $s.dir, $s.cmd, $st) -ForegroundColor $color
+        }
+    }
+
+    function CLI-Add {
+        # args: add <key> <group> <short> <port> <dir> <cmd>
+        if ($args_.Count -lt 7) {
+            Write-Host "Usage: DevLauncher.bat add <key> <group> <short> <port> <dir> <cmd>" -ForegroundColor Yellow
+            Write-Host "  Example: DevLauncher.bat add my-api MyApp API 8080 C:\Projects\api ""mvnw.cmd spring-boot:run""" -ForegroundColor Gray
+            return
+        }
+        $key = $args_[1]; $grp = $args_[2]; $sh = $args_[3]; $pt = $args_[4]; $dr = $args_[5]; $cm = $args_[6]
+        if ($svcs.Contains($key)) {
+            Write-Host "ERROR: Key '$key' already exists. Use 'edit' to modify or 'remove' first." -ForegroundColor Red
+            return
+        }
+        $svcs[$key] = [PSCustomObject]@{ key=$key; group=$grp; short=$sh; port=[int]$pt; dir=$dr; cmd=$cm }
+        CLI-SaveConfig
+        Write-Host "Added: $key ($sh :$pt)" -ForegroundColor Green
+    }
+
+    function CLI-Remove([string]$key) {
+        if (-not $svcs.Contains($key)) {
+            Write-Host "ERROR: Unknown service '$key'." -ForegroundColor Red
+            return
+        }
+        $s = $svcs[$key]
+        # Stop if running
+        $procId = CLI-GetPortPid ([int]$s.port)
+        if ($procId -gt 0) {
+            & taskkill /F /T /PID $procId 2>$null | Out-Null
+            Write-Host "$($s.short) :$($s.port) stopped." -ForegroundColor Yellow
+        }
+        $svcs.Remove($key)
+        CLI-SaveConfig
+        Write-Host "Removed: $key" -ForegroundColor Green
+    }
+
+    function CLI-Edit {
+        # args: edit <key> <field> <value>
+        if ($args_.Count -lt 4) {
+            Write-Host "Usage: DevLauncher.bat edit <key> <field> <value>" -ForegroundColor Yellow
+            Write-Host "  Fields: group, short, port, dir, cmd" -ForegroundColor Gray
+            return
+        }
+        $key = $args_[1]; $field = $args_[2].ToLower(); $val = $args_[3]
+        if (-not $svcs.Contains($key)) {
+            Write-Host "ERROR: Unknown service '$key'." -ForegroundColor Red
+            return
+        }
+        $validFields = @("group","short","port","dir","cmd")
+        if ($field -notin $validFields) {
+            Write-Host "ERROR: Invalid field '$field'. Valid: $($validFields -join ', ')" -ForegroundColor Red
+            return
+        }
+        $s = $svcs[$key]
+        $old = $s.$field
+        if ($field -eq "port") { $val = [int]$val }
+        $s | Add-Member -NotePropertyName $field -NotePropertyValue $val -Force
+        CLI-SaveConfig
+        Write-Host "Updated: $key.$field = $val (was: $old)" -ForegroundColor Green
+    }
+
+    function CLI-Quit {
+        $killed = $false
+        # Find DevLauncher GUI processes (PowerShell running DevLauncher.ps1 without CLI args)
+        $procs = Get-CimInstance Win32_Process -Filter "name='powershell.exe'" -EA SilentlyContinue |
+            Where-Object { $_.ProcessId -ne $PID -and $_.CommandLine -match 'DevLauncher\.ps1' -and $_.CommandLine -notmatch '\s(status|start|stop|restart|list|help|config|add|remove|edit|quit)' }
+        foreach ($p in $procs) {
+            Stop-Process -Id $p.ProcessId -Force -EA SilentlyContinue
+            $killed = $true
+        }
+        if ($killed) {
+            Write-Host "DevLauncher GUI stopped." -ForegroundColor Green
+        } else {
+            Write-Host "DevLauncher GUI is not running." -ForegroundColor Gray
+        }
+    }
+
     $cmd = $args[0].ToLower()
     $target = if ($args.Count -gt 1) { $args[1] } else { $null }
+    $args_ = $args  # alias for functions that need full args
 
     switch ($cmd) {
         "status" { CLI-Status }
         "list"   { $svcs.Keys | ForEach-Object { Write-Host $_ } }
+        "config" { CLI-ShowConfig }
         "start"  {
             if (-not $target) {
                 Write-Host "Usage: DevLauncher.bat start <key|all>" -ForegroundColor Yellow
@@ -126,16 +224,36 @@ if ($args.Count -gt 0) {
                 CLI-Stop $target; CLI-Start $target
             }
         }
+        "add"    { CLI-Add }
+        "remove" {
+            if (-not $target) {
+                Write-Host "Usage: DevLauncher.bat remove <key>" -ForegroundColor Yellow
+            } else {
+                CLI-Remove $target
+            }
+        }
+        "edit"   { CLI-Edit }
+        "quit"   { CLI-Quit }
         "help" {
             Write-Host "Dev Server Launcher v$script:AppVersion - CLI" -ForegroundColor Cyan
             Write-Host ""
-            Write-Host "  DevLauncher.bat                Open GUI (tray + dashboard)"
-            Write-Host "  DevLauncher.bat status         Show all service statuses"
-            Write-Host "  DevLauncher.bat list           List service keys"
-            Write-Host "  DevLauncher.bat start <key>    Start a service (or 'all')"
-            Write-Host "  DevLauncher.bat stop <key>     Stop a service (or 'all')"
-            Write-Host "  DevLauncher.bat restart <key>  Restart a service (or 'all')"
-            Write-Host "  DevLauncher.bat help           Show this help"
+            Write-Host "  Services:" -ForegroundColor White
+            Write-Host "    status               Show all service statuses"
+            Write-Host "    start <key|all>      Start a service"
+            Write-Host "    stop <key|all>       Stop a service"
+            Write-Host "    restart <key|all>    Restart a service"
+            Write-Host "    list                 List service keys"
+            Write-Host ""
+            Write-Host "  Config:" -ForegroundColor White
+            Write-Host "    config               Show full config with status"
+            Write-Host "    add <key> <group> <short> <port> <dir> <cmd>"
+            Write-Host "    remove <key>         Remove a service"
+            Write-Host "    edit <key> <field> <value>"
+            Write-Host "                         Fields: group, short, port, dir, cmd"
+            Write-Host ""
+            Write-Host "  GUI:" -ForegroundColor White
+            Write-Host "    quit                 Stop the running GUI"
+            Write-Host "    (no args)            Launch GUI"
         }
         default {
             Write-Host "Unknown command: $cmd. Use 'help' for usage." -ForegroundColor Red
