@@ -1,61 +1,98 @@
 # Dev Server Launcher
 
-A lightweight PowerShell system tray application for managing multiple development servers. Start, stop, restart, and monitor all your dev services from a single tray icon.
+A lightweight Windows tray app + CLI for managing multiple development servers.  
+Start, stop, monitor, and read logs — from GUI, terminal, or **AI coding assistants like Claude Code**.
 
-## Features
+## Quick Start
 
-- **System Tray Control** — Right-click the tray icon to start/stop individual services or all at once
-- **Dashboard Window** — Double-click the tray icon to open a status dashboard with per-service controls
-- **Console Management** — Show/hide each service's console window on demand
-- **Port-based Monitoring** — Automatically detects service status by checking listening ports
-- **Error Detection** — Alerts when a running service goes down unexpectedly or exceeds startup timeout
-- **Startup History** — Tracks average startup times and shows estimated remaining time
-- **Single Instance** — Mutex-based lock prevents duplicate launcher instances
-- **Auto Icon Generation** — Creates its own `.ico` file and desktop shortcut on first run
+```
+# Download latest release
+# https://github.com/DreamingStrawberry/dev-server-launcher/releases
 
-## Requirements
+# Double-click to open GUI
+DevLauncher.bat
 
-- Windows 10/11
-- PowerShell 5.1+
+# Or use CLI
+DevLauncher.bat status
+DevLauncher.bat start all
+DevLauncher.bat logs my-backend
+```
 
-## Installation
+## CLI Reference
 
-1. Download or clone this repository
-2. Place the files in any directory (e.g., `C:\DevLauncher\`)
-3. Double-click `DevLauncher.bat` to launch
+> **For AI Assistants (Claude Code, Cursor, etc.):**  
+> All commands are available via `cmd.exe /c "C:\path\to\DevLauncher.bat <command>"`.  
+> Use `status` to check services, `start`/`stop` to control them, `logs` to read output, and `config`/`add`/`edit`/`remove` to manage configuration — all without opening the GUI.
 
-A desktop shortcut is created automatically on first run.
+### Service Control
 
-## Usage
+```bash
+DevLauncher.bat status              # Show all service statuses (Running/Stopped)
+DevLauncher.bat start <key>         # Start a service
+DevLauncher.bat start all           # Start all services
+DevLauncher.bat stop <key>          # Stop a service
+DevLauncher.bat stop all            # Stop all services
+DevLauncher.bat restart <key>       # Restart a service
+DevLauncher.bat restart all         # Restart all services
+DevLauncher.bat list                # List service keys
+```
 
-### Tray Icon
+### Log Viewing
 
-| Action | Result |
-|--------|--------|
-| Right-click | Open service menu (Start/Stop/Restart per service) |
-| Double-click | Open dashboard window |
+All service stdout/stderr is captured to `logs/<key>.log`.
+
+```bash
+DevLauncher.bat logs                # Show recent output for all services
+DevLauncher.bat logs <key>          # Show last 50 lines of a service log
+DevLauncher.bat logs <key> 200      # Show last 200 lines
+```
+
+### Configuration Management
+
+```bash
+DevLauncher.bat config              # Show full config with live status
+
+# Add a new service
+DevLauncher.bat add <key> <group> <short> <port> <dir> <cmd>
+DevLauncher.bat add my-api MyApp API 8080 "C:\Projects\api" "mvnw.cmd spring-boot:run"
+
+# Edit a service field (group, short, port, dir, cmd)
+DevLauncher.bat edit <key> <field> <value>
+DevLauncher.bat edit my-api port 8090
+DevLauncher.bat edit my-api cmd "mvnw.cmd spring-boot:run -DskipTests"
+
+# Remove a service (stops it if running)
+DevLauncher.bat remove <key>
+```
+
+### System
+
+```bash
+DevLauncher.bat version             # Show version + check for updates
+DevLauncher.bat update              # Download and apply latest release
+DevLauncher.bat quit                # Stop the running GUI instance
+DevLauncher.bat help                # Show all commands
+```
+
+## GUI Features
+
+- **System Tray** — Right-click for service menu, double-click for dashboard
+- **Dashboard** — Real-time status, Start/Stop/Restart, Show/Hide console windows
+- **Hot-reload Settings** — Edit config in GUI, applies instantly without restart
+- **Error Detection** — Alerts when a service goes down or exceeds startup timeout
+- **Auto-update** — Checks GitHub releases on startup, auto-downloads new versions
 
 ### Tray Icon Colors
 
 | Color | Meaning |
 |-------|---------|
-| Green | At least one service is running |
-| Red | A service encountered an error |
-| Gray | All services are stopped |
-
-### Dashboard
-
-The dashboard shows real-time status for each service:
-- `Start` / `Restart` — Launch or restart a service
-- `Stop` — Stop a running service
-- `Cmd` — Toggle the service's console window (flashes red on error)
-- `All Start` — Start all services sequentially
-- `All Stop` — Stop all services
-- `Show/Hide Cmd` — Toggle all console windows
+| Green | At least one service running |
+| Red | Error detected |
+| Gray | All stopped |
 
 ## Configuration
 
-On first run, a `DevLauncher.config.json` file is created with example services. Edit it to define your own:
+On first run, `DevLauncher.config.json` is created with example services:
 
 ```json
 [
@@ -80,22 +117,55 @@ On first run, a `DevLauncher.config.json` file is created with example services.
 
 | Field | Description |
 |-------|-------------|
-| `key` | Unique identifier for the service |
-| `group` | Group header in tray menu (services with same group are grouped together) |
-| `short` | Short name used in menu and dashboard |
+| `key` | Unique identifier |
+| `group` | Group name (services with same group are grouped in tray menu) |
+| `short` | Short display name |
 | `port` | TCP port to monitor for status detection |
-| `dir` | Working directory for the service command |
-| `cmd` | Command to execute (runs inside `cmd.exe /k`) |
+| `dir` | Working directory |
+| `cmd` | Command to execute |
+
+## Using with Claude Code
+
+Claude Code can fully control Dev Server Launcher via CLI. Example workflow:
+
+```bash
+# Check what's running
+cmd.exe /c "C:\Users\YOU\DevLauncher.bat status"
+
+# Start the backend you need
+cmd.exe /c "C:\Users\YOU\DevLauncher.bat start my-backend"
+
+# Read Spring Boot startup logs to check for errors
+cmd.exe /c "C:\Users\YOU\DevLauncher.bat logs my-backend 100"
+
+# Add a new service for a new project
+cmd.exe /c "C:\Users\YOU\DevLauncher.bat add new-api NewProject API 8090 D:\Projects\new-app ""mvnw.cmd spring-boot:run"""
+
+# Update the launcher itself
+cmd.exe /c "C:\Users\YOU\DevLauncher.bat update"
+```
+
+## Requirements
+
+- Windows 10/11
+- PowerShell 5.1+
+
+## Installation
+
+1. Download the latest [release](https://github.com/DreamingStrawberry/dev-server-launcher/releases)
+2. Extract to any directory (e.g., `C:\DevLauncher\`)
+3. Double-click `DevLauncher.bat` — desktop shortcut is created on first run
 
 ## File Structure
 
 ```
-DevLauncher.ps1           # Main script
-DevLauncher.bat           # Launcher (kills previous instance, runs ps1)
-DevLauncher.ico           # Auto-generated tray/taskbar icon
-DevLauncher.config.json   # Service definitions (auto-generated, gitignored)
-DevLauncher.history.json  # Startup time history (auto-generated, gitignored)
-DevLauncher.log           # Error log (auto-generated, gitignored)
+DevLauncher.bat             # Entry point (GUI or CLI based on args)
+DevLauncher.ps1             # Main script
+DevLauncher.ico             # Auto-generated icon
+DevLauncher.config.json     # Service config (auto-generated, gitignored)
+DevLauncher.history.json    # Startup time history (gitignored)
+logs/                       # Service output logs (gitignored)
+  <key>.log                 # Per-service log file
 ```
 
 ## License
