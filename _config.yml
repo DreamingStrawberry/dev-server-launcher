@@ -1,0 +1,6 @@
+title: Dev Server Launcher
+description: Windows dev server manager with GUI tray + CLI. Control Spring Boot, Vite, npm services. Claude Code / AI assistant compatible.
+url: https://dreamingstrawberry.github.io
+baseurl: /dev-server-launcher
+plugins:
+  - jekyll-seo-tag
