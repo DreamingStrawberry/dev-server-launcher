@@ -724,7 +724,8 @@ function Start-Svc([string]$key, [bool]$quiet = $false) {
     @"
 `$host.UI.RawUI.WindowTitle = '$title'
 '' | Set-Content '$logFile'$delaySuffix
-& cmd /c 'cd /d $($svc.Dir) && $($svc.Cmd)' 2>&1 | ForEach-Object { Write-Host `$_; Add-Content '$logFile' `$_ }
+Set-Location '$($svc.Dir)'
+& cmd /c '$($svc.Cmd)' 2>&1 | ForEach-Object { Write-Host `$_; Add-Content '$logFile' `$_ }
 Write-Host '--- Process exited ---' -ForegroundColor Red
 Read-Host 'Press Enter to close'
 "@ | Set-Content $launcher -Encoding UTF8
