@@ -1,0 +1,18 @@
+[
+    {
+        "key":  "my-back",
+        "group":  "MyApp",
+        "short":  "Back",
+        "port":  8080,
+        "dir":  "C:\\Projects\\my-app\\backend",
+        "cmd":  "gradlew.bat bootRun"
+    },
+    {
+        "key":  "my-front",
+        "group":  "MyApp",
+        "short":  "Front",
+        "port":  3000,
+        "dir":  "C:\\Projects\\my-app\\frontend",
+        "cmd":  "npm run dev"
+    }
+]

@@ -1,5 +1,6 @@
 DevLauncher.history.json
-DevLauncher.config.json
 DevLauncher.log
+DevLauncher.debug.log
 *.log
 logs/
+node_modules/

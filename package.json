@@ -1,0 +1,40 @@
+{
+  "name": "dev-server-launcher",
+  "version": "1.6.0",
+  "description": "Windows system tray dev server launcher - manage multiple dev servers (Spring Boot, React, Next.js, etc.) with GUI tray icon and CLI",
+  "main": "DevLauncher.ps1",
+  "bin": {
+    "dev-launcher": "DevLauncher.bat"
+  },
+  "scripts": {
+    "start": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File DevLauncher.ps1",
+    "status": "DevLauncher.bat status"
+  },
+  "keywords": [
+    "dev-server",
+    "launcher",
+    "system-tray",
+    "windows",
+    "powershell",
+    "spring-boot",
+    "react",
+    "nextjs",
+    "developer-tools"
+  ],
+  "author": "DreamingStrawberry",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/DreamingStrawberry/dev-server-launcher"
+  },
+  "homepage": "https://github.com/DreamingStrawberry/dev-server-launcher",
+  "os": ["win32"],
+  "files": [
+    "DevLauncher.bat",
+    "DevLauncher.ps1",
+    "DevLauncher.ico",
+    "DevLauncher.config.json",
+    "README.md",
+    "LICENSE"
+  ]
+}

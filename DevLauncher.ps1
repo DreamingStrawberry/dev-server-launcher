@@ -1,13 +1,13 @@
 ﻿#Requires -Version 5.1
 <#
 .SYNOPSIS  Dev Server Launcher - System Tray
-.VERSION   1.5.0
+.VERSION   1.6.0
 .NOTES     DevLauncher.bat 더블클릭으로 실행
            트레이 아이콘 우클릭 → 서비스 시작/중지
            각 서비스는 별도 cmd 창에서 실행 (로그 확인 가능)
 #>
 
-$script:AppVersion = "1.5.0"
+$script:AppVersion = "1.6.0"
 
 # ═══════════════════════════════════════════════
 # CLI Mode (args present → no GUI, execute and exit)
@@ -38,16 +38,46 @@ if ($args.Count -gt 0) {
     }
     function CLI-TestPort([int]$port) { return (CLI-GetPortPid $port) -gt 0 }
 
+    function CLI-LoadActivity {
+        $logDir = CLI-EnsureLogDir
+        $actFile = Join-Path $logDir "_activity.json"
+        $act = @{}
+        if (Test-Path $actFile) {
+            try { $json = Get-Content $actFile -Raw | ConvertFrom-Json; foreach ($p in $json.PSObject.Properties) { $act[$p.Name] = $p.Value } } catch {}
+        }
+        return $act
+    }
+
     function CLI-Status {
         $maxKey = ($svcs.Keys | ForEach-Object { $_.Length } | Measure-Object -Maximum).Maximum
         $maxShort = ($svcs.Values | ForEach-Object { $_.short.Length } | Measure-Object -Maximum).Maximum
+        $act = CLI-LoadActivity
+        $now = [DateTime]::Now
         foreach ($key in $svcs.Keys) {
             $s = $svcs[$key]
             $active = CLI-TestPort ([int]$s.port)
-            $status = if ($active) { "Running" } else { "Stopped" }
-            $color  = if ($active) { "Green" } else { "Gray" }
-            $dot    = if ($active) { [char]0x25CF } else { [char]0x25CB }
-            Write-Host ("{0}  {1}  {2}  :{3,-5}  {4}" -f $dot, $key.PadRight($maxKey), $s.short.PadRight($maxShort), $s.port, $status) -ForegroundColor $color
+            # Detect Starting: recently started (within 3 min) but port not up
+            $isStarting = $false
+            if (-not $active -and $act[$key] -and $act[$key].action -eq "start") {
+                try {
+                    $startTime = [DateTime]::ParseExact($act[$key].time, "yyyy-MM-dd HH:mm:ss", $null)
+                    if (($now - $startTime).TotalSeconds -lt 180) { $isStarting = $true }
+                } catch {}
+            }
+            if ($active) {
+                $status = "Running"; $color = "Green"; $dot = [char]0x25CF
+            } elseif ($isStarting) {
+                $status = "Starting"; $color = "Yellow"; $dot = [char]0x25E6
+            } else {
+                $status = "Stopped"; $color = "Gray"; $dot = [char]0x25CB
+            }
+            $by = ""
+            if ($act[$key]) {
+                $src = $act[$key].source
+                $tm = $act[$key].time
+                $by = " (by $src $tm)"
+            }
+            Write-Host ("{0}  {1}  {2}  :{3,-5}  {4}{5}" -f $dot, $key.PadRight($maxKey), $s.short.PadRight($maxShort), $s.port, $status, $by) -ForegroundColor $color
         }
     }
 
@@ -55,6 +85,22 @@ if ($args.Count -gt 0) {
         $d = Join-Path $PSScriptRoot "logs"
         if (-not (Test-Path $d)) { New-Item $d -ItemType Directory -Force | Out-Null }
         return $d
+    }
+
+    # Activity log: who did what and when
+    function CLI-LogActivity([string]$key, [string]$action, [string]$source) {
+        $logDir = CLI-EnsureLogDir
+        $actFile = Join-Path $logDir "_activity.json"
+        $activities = @{}
+        if (Test-Path $actFile) {
+            try { $json = Get-Content $actFile -Raw | ConvertFrom-Json; foreach ($p in $json.PSObject.Properties) { $activities[$p.Name] = $p.Value } } catch {}
+        }
+        $activities[$key] = [ordered]@{
+            action = $action
+            source = $source
+            time   = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
+        }
+        $activities | ConvertTo-Json -Depth 3 | Set-Content $actFile -Encoding UTF8
     }
 
     function CLI-Start([string]$key) {
@@ -74,16 +120,28 @@ if ($args.Count -gt 0) {
         $title = "DevLauncher_$($s.short)_$port"
         $logDir = CLI-EnsureLogDir
         $logFile = Join-Path $logDir "$key.log"
-        # Create launcher script that tees output to log file
+        # Auto-inject port into command based on framework detection
+        $cmdStr = $s.cmd -replace '%PORT%', $port
+        if ($cmdStr -notmatch '--server\.port|--port\s|%PORT%') {
+            if ($cmdStr -match 'spring-boot:run') {
+                $cmdStr = "$cmdStr --server.port=$port"
+            } elseif ($cmdStr -match 'npm\s+run\s+dev|vite|next\s+dev') {
+                $cmdStr = "$cmdStr --port $port"
+            }
+        }
+        # Create launcher script that sets PORT env vars + tees output to log file
         $launcher = Join-Path $logDir "_run_$key.ps1"
         @"
 `$host.UI.RawUI.WindowTitle = '$title'
+`$env:PORT = '$port'
+`$env:SERVER_PORT = '$port'
 '' | Set-Content '$logFile'
-& cmd /c 'cd /d $($s.dir) && $($s.cmd)' 2>&1 | ForEach-Object { Write-Host `$_; Add-Content '$logFile' `$_ }
+& cmd /c 'cd /d $($s.dir) && $cmdStr' 2>&1 | ForEach-Object { Write-Host `$_; Add-Content '$logFile' `$_ }
 Write-Host '--- Process exited ---' -ForegroundColor Red
 Read-Host 'Press Enter to close'
 "@ | Set-Content $launcher -Encoding UTF8
         Start-Process -FilePath "conhost.exe" -ArgumentList "powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$launcher`"" -WindowStyle Hidden
+        CLI-LogActivity $key "start" "CLI"
         Write-Host "$($s.short) :$port starting... (log: logs/$key.log)" -ForegroundColor Cyan
         return
     }
@@ -98,6 +156,7 @@ Read-Host 'Press Enter to close'
         $procId = CLI-GetPortPid $port
         if ($procId -gt 0) {
             & taskkill /F /T /PID $procId 2>$null | Out-Null
+            CLI-LogActivity $key "stop" "CLI"
             Write-Host "$($s.short) :$port stopped." -ForegroundColor Green
         } else {
             Write-Host "$($s.short) :$port not running." -ForegroundColor Gray
@@ -691,6 +750,22 @@ function Update-TrayIcon {
     $script:tray.Text = $tip
 }
 
+function Log-Activity([string]$key, [string]$action, [string]$source) {
+    $logDir = Join-Path $PSScriptRoot "logs"
+    if (-not (Test-Path $logDir)) { New-Item $logDir -ItemType Directory -Force | Out-Null }
+    $actFile = Join-Path $logDir "_activity.json"
+    $activities = @{}
+    if (Test-Path $actFile) {
+        try { $json = Get-Content $actFile -Raw | ConvertFrom-Json; foreach ($p in $json.PSObject.Properties) { $activities[$p.Name] = $p.Value } } catch {}
+    }
+    $activities[$key] = [ordered]@{
+        action = $action
+        source = $source
+        time   = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
+    }
+    $activities | ConvertTo-Json -Depth 3 | Set-Content $actFile -Encoding UTF8
+}
+
 function Start-Svc([string]$key, [bool]$quiet = $false) {
     $svc = $script:services[$key]
     $script:errorSet.Remove($key)
@@ -719,13 +794,24 @@ function Start-Svc([string]$key, [bool]$quiet = $false) {
     # If port was occupied, wait inside launcher for release
     $delaySuffix = if ($portWasActive) { "; Start-Sleep -Seconds 3" } else { "" }
 
-    # Create launcher script: tee output to both console and log file
+    # Auto-inject port into command based on framework detection
+    $cmdStr = $svc.Cmd -replace '%PORT%', $svc.Port
+    if ($cmdStr -notmatch '--server\.port|--port\s|%PORT%') {
+        if ($cmdStr -match 'spring-boot:run') {
+            $cmdStr = "$cmdStr --server.port=$($svc.Port)"
+        } elseif ($cmdStr -match 'npm\s+run\s+dev|vite|next\s+dev') {
+            $cmdStr = "$cmdStr --port $($svc.Port)"
+        }
+    }
+
+    # Create launcher script: set PORT env vars + tee output to log file
     $launcher = Join-Path $logDir "_run_$key.ps1"
     @"
 `$host.UI.RawUI.WindowTitle = '$title'
+`$env:PORT = '$($svc.Port)'
+`$env:SERVER_PORT = '$($svc.Port)'
 '' | Set-Content '$logFile'$delaySuffix
-Set-Location '$($svc.Dir)'
-& cmd /c '$($svc.Cmd)' 2>&1 | ForEach-Object { Write-Host `$_; Add-Content '$logFile' `$_ }
+& cmd /c 'cd /d $($svc.Dir) && $cmdStr' 2>&1 | ForEach-Object { Write-Host `$_; Add-Content '$logFile' `$_ }
 Write-Host '--- Process exited ---' -ForegroundColor Red
 Read-Host 'Press Enter to close'
 "@ | Set-Content $launcher -Encoding UTF8
@@ -739,6 +825,7 @@ Read-Host 'Press Enter to close'
     $script:cmdVisible[$key] = $false
     $script:cmdHandles[$key] = [IntPtr]::Zero
 
+    Log-Activity $key "start" "GUI"
     Update-TrayIcon
     if (-not $quiet) {
         $script:tray.ShowBalloonTip(2000, "Started", $svc.Label, [System.Windows.Forms.ToolTipIcon]::Info)
@@ -761,6 +848,7 @@ function Stop-Svc([string]$key, [bool]$quiet = $false) {
     $script:startingSet.Remove($key)
     $script:startTimes.Remove($key)
 
+    Log-Activity $key "stop" "GUI"
     Update-TrayIcon
     if (-not $quiet) {
         $script:tray.ShowBalloonTip(1500, "Stopped", $svc.Label, [System.Windows.Forms.ToolTipIcon]::Warning)
